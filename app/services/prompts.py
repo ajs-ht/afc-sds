@@ -3,7 +3,18 @@
 SYSTEM_PROMPT is identical on every request, so it is sent with
 `cache_control: {"type": "ephemeral"}` (see extraction_service.py) to make
 repeat calls cheaper and faster.
+
+The output JSON shape is enforced by embedding the schema in the prompt and
+validating the response with Pydantic afterwards, rather than via Claude's
+structured-outputs `output_config` — the full SDSDocument schema (13 reused
+SDSSection refs plus the sections 1-3 nested models) exceeds the API's
+compiled-grammar size limit ("The compiled grammar is too large... reduce
+the number of strict tools"), so constrained decoding cannot be used here.
 """
+
+import json
+
+from app.schemas.sds import SDS_JSON_SCHEMA
 
 SYSTEM_PROMPT = """\
 あなたは化学物質の安全データシート(SDS)をJIS Z 7253の標準16項目構成に沿って
@@ -44,9 +55,14 @@ SYSTEM_PROMPT = """\
 - 4〜16項目の内容は、原文の情報を欠落させることなく、読みやすいMarkdown形式の
   テキストとして "content_markdown" に整理してください(表はMarkdown表記で構いま
   せん)。
-- 出力は指定されたJSON Schemaに厳密に従ってください。スキーマにないフィールド
+- 出力は以下のJSON Schemaに厳密に従ってください。スキーマにないフィールド
   を追加しないでください。
-"""
+- 出力は有効なJSONオブジェクトのみとしてください。前置き・説明文・```のような
+  コードブロック記法を一切含めないでください。
+
+# 出力JSON Schema
+{schema_json}
+""".format(schema_json=json.dumps(SDS_JSON_SCHEMA, ensure_ascii=False))
 
 USER_INSTRUCTION = (
     "添付のSDS文書を読み取り、JIS Z 7253の16項目構成に沿った構造化JSONとして"

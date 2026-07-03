@@ -76,9 +76,30 @@ def test_extract_sds_success_builds_expected_request(settings):
     assert kwargs["model"] == settings.model_id
     assert kwargs["max_tokens"] == settings.max_output_tokens
     assert kwargs["system"][0]["cache_control"] == {"type": "ephemeral"}
-    assert kwargs["output_config"]["format"]["type"] == "json_schema"
+    # No output_config: the full schema exceeds Claude's compiled-grammar size
+    # limit, so the schema is embedded in the (cached) system prompt instead
+    # and enforced by post-hoc Pydantic validation below.
+    assert "output_config" not in kwargs
+    assert "section_1_product_and_company" in kwargs["system"][0]["text"]
     content_blocks = kwargs["messages"][0]["content"]
     assert content_blocks[0]["type"] == "document"
+
+
+def test_extract_sds_strips_wrapping_code_fence(settings):
+    payload = minimal_sds_payload()
+    fenced_text = "```json\n" + json.dumps(payload) + "\n```"
+    message = fake_message(text=fenced_text, stop_reason="end_turn")
+    client = _client_returning(message)
+
+    result = extract_sds(
+        content=b"%PDF-1.4...",
+        content_type="application/pdf",
+        client=client,
+        settings=settings,
+        request_id="req-3",
+    )
+
+    assert result.data.schema_version == "1.0"
 
 
 def test_extract_sds_uses_image_block_for_image_upload(settings):
