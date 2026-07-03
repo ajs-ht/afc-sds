@@ -9,22 +9,16 @@ through the real /v1/sds/extract endpoint and does a light sanity check on
 the result plus logs token usage for a cost sanity check.
 """
 
-import os
 from pathlib import Path
 
 import pytest
 
-RUN_INTEGRATION = os.environ.get("RUN_INTEGRATION") == "1"
-REAL_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-HAS_REAL_KEY = bool(REAL_API_KEY) and REAL_API_KEY != "test-anthropic-key"
+from tests.conftest import requires_live_api
 
 pytestmark = pytest.mark.integration
 
 
-@pytest.mark.skipif(
-    not (RUN_INTEGRATION and HAS_REAL_KEY),
-    reason="set RUN_INTEGRATION=1 and a real ANTHROPIC_API_KEY to run this test",
-)
+@requires_live_api
 def test_live_extraction_returns_structured_sds(client, auth_headers):
     fixture_path = Path(__file__).parent.parent / "fixtures" / "sample_sds.pdf"
 

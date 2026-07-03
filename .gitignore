@@ -5,3 +5,9 @@ __pycache__/
 venv/
 *.egg-info/
 .env
+
+# Real-world SDS samples are third-party copyrighted material supplied
+# locally for testing only — never commit them or their extraction output.
+tests/fixtures/real_world/*
+!tests/fixtures/real_world/.gitkeep
+!tests/fixtures/real_world/README.md

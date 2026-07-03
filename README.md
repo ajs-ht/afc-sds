@@ -46,6 +46,20 @@ pytest                              # ユニットテスト（実APIキー不要
 RUN_INTEGRATION=1 pytest -m integration   # 統合テスト（実ANTHROPIC_API_KEYが必要）
 ```
 
+### 実世界のSDSサンプルによる検証
+
+`tests/fixtures/real_world/` に実際のSDSファイル（PDF/PNG/JPEG/WebP）を置くと、
+それぞれについて実際に `/v1/sds/extract` を呼び出しJSON生成を検証するテストが有効になります。
+
+```bash
+RUN_INTEGRATION=1 ANTHROPIC_API_KEY=sk-ant-... \
+  pytest -m integration tests/integration/test_real_world_extraction.py -s
+```
+
+- 生成されたJSONは `tests/fixtures/real_world/_results/<ファイル名>.json` に書き出され、目視で確認できます。
+- サンプルファイル自体・生成結果はいずれもgitignore対象で、コミットされません（SDSは配布元の著作物のため）。
+- サンプルが1件も無い場合はテストが失敗ではなくスキップされるため、通常の開発/CIには影響しません。
+
 ## API
 
 ### `POST /v1/sds/extract`
