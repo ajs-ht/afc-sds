@@ -1,0 +1,31 @@
+from functools import lru_cache
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    anthropic_api_key: str
+    model_id: str = "claude-opus-4-8"
+
+    api_key: str
+
+    max_upload_mb: int = 32
+    allowed_mime_types: frozenset[str] = frozenset(
+        {"application/pdf", "image/png", "image/jpeg", "image/webp"}
+    )
+    max_pdf_pages: int = 50
+
+    max_output_tokens: int = 24000
+
+    log_level: str = "INFO"
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @property
+    def max_upload_bytes(self) -> int:
+        return self.max_upload_mb * 1024 * 1024
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
