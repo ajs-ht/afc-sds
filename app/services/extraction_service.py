@@ -1,4 +1,5 @@
 import base64
+import re
 
 import anthropic
 from pydantic import ValidationError
@@ -12,8 +13,10 @@ from app.core.exceptions import (
 )
 from app.core.logging import log_usage
 from app.schemas.responses import ExtractionUsage, SDSExtractionResponse
-from app.schemas.sds import SDS_JSON_SCHEMA, SDSDocument
+from app.schemas.sds import SDSDocument
 from app.services.prompts import SYSTEM_PROMPT, USER_INSTRUCTION
+
+_CODE_FENCE_RE = re.compile(r"^```(?:json)?\s*\n?|\n?```\s*$")
 
 PDF_MIME_TYPE = "application/pdf"
 
@@ -65,7 +68,6 @@ def extract_sds(
                     "content": [document_block, {"type": "text", "text": USER_INSTRUCTION}],
                 }
             ],
-            output_config={"format": {"type": "json_schema", "schema": SDS_JSON_SCHEMA}},
         ) as stream:
             message = stream.get_final_message()
     except anthropic.RateLimitError as exc:
@@ -106,7 +108,7 @@ def extract_sds(
             category=getattr(details, "category", None) if details else None,
         )
 
-    text = _extract_text_block(message)
+    text = _strip_code_fence(_extract_text_block(message))
 
     try:
         parsed = SDSDocument.model_validate_json(text)
@@ -141,3 +143,16 @@ def _extract_text_block(message) -> str:
         if block.type == "text":
             return block.text
     raise ClaudeResponseInvalidError("Claude's response contained no text content block.")
+
+
+def _strip_code_fence(text: str) -> str:
+    """Strip a wrapping ```json ... ``` fence, if Claude added one.
+
+    Without structured-outputs constrained decoding (see prompts.py), Claude
+    occasionally wraps its JSON in a markdown code fence despite being told
+    not to; this undoes that so model_validate_json sees raw JSON.
+    """
+    text = text.strip()
+    if text.startswith("```"):
+        text = _CODE_FENCE_RE.sub("", text).strip()
+    return text
