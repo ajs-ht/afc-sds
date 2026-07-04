@@ -68,7 +68,11 @@ RUN_INTEGRATION=1 ANTHROPIC_API_KEY=sk-ant-... \
 - リクエスト: `multipart/form-data`、`file` フィールドにPDFまたは画像（PNG/JPEG/WebP）
 - レスポンス: JIS Z 7253 16項目の構造化JSON（`data`）+ `warnings` + `usage`（トークン使用量）
 
-エラー時は `{"error": {"type": "...", "message": "..."}}` 形式で返却されます。
+すべてのレスポンスに `X-Request-ID` ヘッダが付与されます。この値はサーバーログ
+(アクセスログ・トークン使用量ログ)の `request_id` と一致するため、問い合わせ時の
+突合に利用できます。
+
+エラー時は `{"error": {"type": "...", "message": "...", "request_id": "..."}}` 形式で返却されます。
 主なエラー種別:
 
 | type | HTTP | 説明 |
@@ -80,3 +84,9 @@ RUN_INTEGRATION=1 ANTHROPIC_API_KEY=sk-ant-... \
 | `extraction_refused` | 422 | Claudeが安全上の理由で処理を拒否 |
 | `extraction_truncated` | 502 | 出力がmax_tokensで途中終了しJSON検証に失敗 |
 | `upstream_error` | 500/503 | Anthropic API側のエラー |
+
+## ログ
+
+- アクセスログ: リクエストごとに `method / path / status / duration_ms / request_id` を1行出力
+- トークン使用量ログ: 抽出ごとに入出力トークン数・キャッシュヒット数を `request_id` 付きで出力
+- `LOG_FORMAT=json` を設定すると、全ログが1行1 JSONオブジェクトの構造化形式になります(ログ基盤への取り込み用)。デフォルトは `text`。

@@ -54,12 +54,12 @@ def test_build_content_block_image():
 # --- happy path -----------------------------------------------------------
 
 
-def test_extract_sds_success_builds_expected_request(settings):
+async def test_extract_sds_success_builds_expected_request(settings):
     payload = minimal_sds_payload()
     message = fake_message(text=json.dumps(payload), stop_reason="end_turn")
     client = _client_returning(message)
 
-    result = extract_sds(
+    result = await extract_sds(
         content=b"%PDF-1.4...",
         content_type="application/pdf",
         client=client,
@@ -85,13 +85,13 @@ def test_extract_sds_success_builds_expected_request(settings):
     assert content_blocks[0]["type"] == "document"
 
 
-def test_extract_sds_strips_wrapping_code_fence(settings):
+async def test_extract_sds_strips_wrapping_code_fence(settings):
     payload = minimal_sds_payload()
     fenced_text = "```json\n" + json.dumps(payload) + "\n```"
     message = fake_message(text=fenced_text, stop_reason="end_turn")
     client = _client_returning(message)
 
-    result = extract_sds(
+    result = await extract_sds(
         content=b"%PDF-1.4...",
         content_type="application/pdf",
         client=client,
@@ -102,12 +102,12 @@ def test_extract_sds_strips_wrapping_code_fence(settings):
     assert result.data.schema_version == "1.0"
 
 
-def test_extract_sds_uses_image_block_for_image_upload(settings):
+async def test_extract_sds_uses_image_block_for_image_upload(settings):
     payload = minimal_sds_payload()
     message = fake_message(text=json.dumps(payload), stop_reason="end_turn")
     client = _client_returning(message)
 
-    extract_sds(
+    await extract_sds(
         content=b"\x89PNG...",
         content_type="image/png",
         client=client,
@@ -123,7 +123,7 @@ def test_extract_sds_uses_image_block_for_image_upload(settings):
 # --- stop_reason branches --------------------------------------------------
 
 
-def test_refusal_raises_claude_refusal_error(settings):
+async def test_refusal_raises_claude_refusal_error(settings):
     message = fake_message(
         text="",
         stop_reason="refusal",
@@ -132,7 +132,7 @@ def test_refusal_raises_claude_refusal_error(settings):
     client = _client_returning(message)
 
     with pytest.raises(ClaudeRefusalError) as excinfo:
-        extract_sds(
+        await extract_sds(
             content=b"data",
             content_type="application/pdf",
             client=client,
@@ -142,12 +142,12 @@ def test_refusal_raises_claude_refusal_error(settings):
     assert excinfo.value.details["category"] == "cyber"
 
 
-def test_max_tokens_with_invalid_json_raises_truncated_error(settings):
+async def test_max_tokens_with_invalid_json_raises_truncated_error(settings):
     message = fake_message(text='{"incomplete": tr', stop_reason="max_tokens")
     client = _client_returning(message)
 
     with pytest.raises(ClaudeTruncatedError):
-        extract_sds(
+        await extract_sds(
             content=b"data",
             content_type="application/pdf",
             client=client,
@@ -156,12 +156,12 @@ def test_max_tokens_with_invalid_json_raises_truncated_error(settings):
         )
 
 
-def test_max_tokens_with_valid_json_returns_warning(settings):
+async def test_max_tokens_with_valid_json_returns_warning(settings):
     payload = minimal_sds_payload()
     message = fake_message(text=json.dumps(payload), stop_reason="max_tokens")
     client = _client_returning(message)
 
-    result = extract_sds(
+    result = await extract_sds(
         content=b"data",
         content_type="application/pdf",
         client=client,
@@ -172,12 +172,12 @@ def test_max_tokens_with_valid_json_returns_warning(settings):
     assert result.warnings == ["output_truncated_max_tokens"]
 
 
-def test_invalid_json_with_other_stop_reason_raises_invalid_response(settings):
+async def test_invalid_json_with_other_stop_reason_raises_invalid_response(settings):
     message = fake_message(text="not json at all", stop_reason="end_turn")
     client = _client_returning(message)
 
     with pytest.raises(ClaudeResponseInvalidError):
-        extract_sds(
+        await extract_sds(
             content=b"data",
             content_type="application/pdf",
             client=client,
@@ -214,11 +214,11 @@ def _fake_response(status_code: int) -> httpx.Response:
         ),
     ],
 )
-def test_anthropic_status_errors_map_to_upstream_error(settings, exc, expected_status):
+async def test_anthropic_status_errors_map_to_upstream_error(settings, exc, expected_status):
     client = _client_raising(exc)
 
     with pytest.raises(ClaudeUpstreamError) as excinfo:
-        extract_sds(
+        await extract_sds(
             content=b"data",
             content_type="application/pdf",
             client=client,
@@ -228,13 +228,13 @@ def test_anthropic_status_errors_map_to_upstream_error(settings, exc, expected_s
     assert excinfo.value.status_code == expected_status
 
 
-def test_anthropic_connection_error_maps_to_503(settings):
+async def test_anthropic_connection_error_maps_to_503(settings):
     request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
     exc = anthropic.APIConnectionError(message="connection failed", request=request)
     client = _client_raising(exc)
 
     with pytest.raises(ClaudeUpstreamError) as excinfo:
-        extract_sds(
+        await extract_sds(
             content=b"data",
             content_type="application/pdf",
             client=client,
