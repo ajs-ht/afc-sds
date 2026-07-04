@@ -27,13 +27,19 @@ Web UIやCLIは提供せず、他システムから呼び出されるHTTP API専
 
 ### 出力の強制方法
 
-出力のスキーマ準拠は二段構えで保証されます。
+出力のスキーマ準拠は次の方式で保証されます。
 
-1. **Structured Outputs** (`output_config.format`) — APIレベルの制約付きデコード（既定で有効）。
-2. **プロンプト埋め込み + Pydantic事後検証** — スキーマのコンパイル済みグラマーが
-   APIのサイズ上限を超えた場合、自動でこちらへフォールバックし、レスポンスの
-   `warnings` に `structured_outputs_unavailable` を付けて通知します。
-   `USE_STRUCTURED_OUTPUTS=false` で最初からこちらの方式に固定できます。
+1. **プロンプト埋め込み + Pydantic事後検証**（既定） — スキーマをシステムプロンプトに
+   埋め込み、レスポンスをPydanticで厳密検証（`additionalProperties: false` 相当）してから
+   返却します。
+2. **Structured Outputs** (`output_config.format`) — `USE_STRUCTURED_OUTPUTS=true` でオプトイン。
+   APIレベルの制約付きデコードになりますが、**現行のClaude APIではSDSスキーマが
+   コンパイル済みグラマーの複雑度上限を超えるため利用できません**（2026-07に実APIで検証。
+   Optionalフィールド20個のフラットなスキーマですら拒否されるため、Optional中心のSDS
+   スキーマは載りません。詳細は `app/services/prompts.py` のdocstring参照）。
+   有効化した場合もグラマー超過を検知すると方式1へ自動フォールバックし、`warnings` に
+   `structured_outputs_unavailable` を付けて通知するため、API側の上限緩和後に安全に
+   再テストできます。
 
 どちらの経路でもレスポンスはPydanticで検証されてから返却されます。
 

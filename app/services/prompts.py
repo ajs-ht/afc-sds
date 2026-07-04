@@ -7,9 +7,20 @@ Two system-prompt variants exist for the two output-enforcement modes
   outputs (`output_config.format`) enforce the JSON shape at the API level,
   so embedding the schema in the prompt would only waste tokens.
 - SYSTEM_PROMPT_WITH_SCHEMA — BASE plus the JSON schema embedded as text.
-  Used as the fallback when the compiled structured-outputs grammar exceeds
-  the API's size limit (or when structured outputs are disabled via
-  settings); the response is then validated with Pydantic after the fact.
+  Used when structured outputs are disabled via settings (the default) or as
+  the automatic fallback when the compiled structured-outputs grammar exceeds
+  the API's size limit; the response is then validated with Pydantic after
+  the fact.
+
+Why structured outputs are off by default (probed against the live API,
+2026-07): the grammar compiler rejects even a flat object with 20 *optional*
+string fields ("Schema is too complex"), while required-only flat objects
+pass at 60+ fields. The SDS schema is dominated by optional fields, nested
+objects, and arrays, and every slimming variant tried (stripping
+title/default/description, collapsing anyOf-null, making all fields
+required) still got "The compiled grammar is too large". Until the limit is
+raised, constrained decoding cannot host this schema — the prompt-embedded
+fallback is the operating mode.
 
 Each variant is byte-stable across requests, so both are sent with
 `cache_control: {"type": "ephemeral"}` and cache independently.

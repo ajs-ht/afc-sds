@@ -25,6 +25,17 @@ def settings() -> Settings:
     return Settings(anthropic_api_key="k", api_key="s", model_id="claude-opus-4-8")
 
 
+@pytest.fixture
+def so_settings() -> Settings:
+    """Settings with structured outputs opted in (off by default)."""
+    return Settings(
+        anthropic_api_key="k",
+        api_key="s",
+        model_id="claude-opus-4-8",
+        use_structured_outputs=True,
+    )
+
+
 def _client_returning(message):
     client = MagicMock()
     client.messages.stream.return_value = FakeStreamContext(message)
@@ -78,22 +89,17 @@ async def test_extract_sds_success_builds_expected_request(settings):
     assert kwargs["model"] == settings.model_id
     assert kwargs["max_tokens"] == settings.max_output_tokens
     assert kwargs["system"][0]["cache_control"] == {"type": "ephemeral"}
-    # Structured outputs enforce the schema at the API level, so the schema
-    # JSON must not also be embedded in the system prompt.
-    assert kwargs["output_config"]["format"]["type"] == "json_schema"
-    assert kwargs["output_config"]["format"]["schema"] == SDS_JSON_SCHEMA
-    assert "section_1_product_and_company" not in kwargs["system"][0]["text"]
+    # Default mode: structured outputs are off (the SDS schema exceeds the
+    # API's compiled-grammar limits — see prompts.py), so the schema is
+    # embedded in the (cached) system prompt and enforced by post-hoc
+    # Pydantic validation.
+    assert "output_config" not in kwargs
+    assert "section_1_product_and_company" in kwargs["system"][0]["text"]
     content_blocks = kwargs["messages"][0]["content"]
     assert content_blocks[0]["type"] == "document"
 
 
-async def test_extract_sds_embeds_schema_when_structured_outputs_disabled():
-    settings = Settings(
-        anthropic_api_key="k",
-        api_key="s",
-        model_id="claude-opus-4-8",
-        use_structured_outputs=False,
-    )
+async def test_extract_sds_uses_structured_outputs_when_enabled(so_settings):
     payload = minimal_sds_payload()
     message = fake_message(text=json.dumps(payload), stop_reason="end_turn")
     client = _client_returning(message)
@@ -102,15 +108,17 @@ async def test_extract_sds_embeds_schema_when_structured_outputs_disabled():
         content=b"%PDF-1.4...",
         content_type="application/pdf",
         client=client,
-        settings=settings,
+        settings=so_settings,
         request_id="req-1b",
     )
 
-    # Explicitly disabled (not unavailable) — no warning.
     assert result.warnings == []
     _, kwargs = client.messages.stream.call_args
-    assert "output_config" not in kwargs
-    assert "section_1_product_and_company" in kwargs["system"][0]["text"]
+    # Structured outputs enforce the schema at the API level, so the schema
+    # JSON must not also be embedded in the system prompt.
+    assert kwargs["output_config"]["format"]["type"] == "json_schema"
+    assert kwargs["output_config"]["format"]["schema"] == SDS_JSON_SCHEMA
+    assert "section_1_product_and_company" not in kwargs["system"][0]["text"]
 
 
 async def test_extract_sds_strips_wrapping_code_fence(settings):
@@ -230,7 +238,7 @@ def _grammar_too_large_error() -> anthropic.BadRequestError:
     )
 
 
-async def test_grammar_size_error_falls_back_to_embedded_schema(settings):
+async def test_grammar_size_error_falls_back_to_embedded_schema(so_settings):
     payload = minimal_sds_payload()
     message = fake_message(text=json.dumps(payload), stop_reason="end_turn")
     client = MagicMock()
@@ -243,7 +251,7 @@ async def test_grammar_size_error_falls_back_to_embedded_schema(settings):
         content=b"%PDF-1.4...",
         content_type="application/pdf",
         client=client,
-        settings=settings,
+        settings=so_settings,
         request_id="req-9",
     )
 
@@ -255,7 +263,7 @@ async def test_grammar_size_error_falls_back_to_embedded_schema(settings):
     assert extraction_service._grammar_too_large is True
 
 
-async def test_grammar_size_error_is_remembered_across_requests(settings):
+async def test_grammar_size_error_is_remembered_across_requests(so_settings):
     payload = minimal_sds_payload()
     extraction_service._grammar_too_large = True
 
@@ -266,7 +274,7 @@ async def test_grammar_size_error_is_remembered_across_requests(settings):
         content=b"%PDF-1.4...",
         content_type="application/pdf",
         client=client,
-        settings=settings,
+        settings=so_settings,
         request_id="req-10",
     )
 
@@ -278,7 +286,7 @@ async def test_grammar_size_error_is_remembered_across_requests(settings):
     assert "output_config" not in kwargs
 
 
-async def test_non_grammar_bad_request_does_not_fall_back(settings):
+async def test_non_grammar_bad_request_does_not_fall_back(so_settings):
     client = _client_raising(
         anthropic.BadRequestError("bad request", response=_fake_response(400), body=None)
     )
@@ -288,7 +296,7 @@ async def test_non_grammar_bad_request_does_not_fall_back(settings):
             content=b"data",
             content_type="application/pdf",
             client=client,
-            settings=settings,
+            settings=so_settings,
             request_id="req-11",
         )
 
