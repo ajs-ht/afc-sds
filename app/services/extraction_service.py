@@ -34,11 +34,11 @@ def build_content_block(content: bytes, content_type: str) -> dict:
     }
 
 
-def extract_sds(
+async def extract_sds(
     *,
     content: bytes,
     content_type: str,
-    client: anthropic.Anthropic,
+    client: anthropic.AsyncAnthropic,
     settings: Settings,
     request_id: str,
 ) -> SDSExtractionResponse:
@@ -47,12 +47,13 @@ def extract_sds(
     Always streams the response (via client.messages.stream) rather than
     calling client.messages.create directly, so large extractions never hit
     the SDK's non-streaming timeout guard regardless of document density.
+    Uses the async client so a long extraction never blocks the event loop.
     """
 
     document_block = build_content_block(content, content_type)
 
     try:
-        with client.messages.stream(
+        async with client.messages.stream(
             model=settings.model_id,
             max_tokens=settings.max_output_tokens,
             system=[
@@ -69,7 +70,7 @@ def extract_sds(
                 }
             ],
         ) as stream:
-            message = stream.get_final_message()
+            message = await stream.get_final_message()
     except anthropic.RateLimitError as exc:
         raise ClaudeUpstreamError(503, "Rate limited by the Anthropic API.") from exc
     except (anthropic.APIConnectionError, anthropic.APITimeoutError) as exc:

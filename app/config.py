@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -18,6 +19,7 @@ class Settings(BaseSettings):
     max_output_tokens: int = 24000
 
     log_level: str = "INFO"
+    log_format: Literal["text", "json"] = "text"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

@@ -1,3 +1,5 @@
+from typing import Optional
+
 from app.schemas.common import StrictModel
 from app.schemas.sds import SDSDocument
 
@@ -19,6 +21,9 @@ class SDSExtractionResponse(StrictModel):
 class ErrorDetail(StrictModel):
     type: str
     message: str
+    # Matches the X-Request-ID response header; use it to correlate a failed
+    # call with server-side logs.
+    request_id: Optional[str] = None
 
 
 class ErrorResponse(StrictModel):

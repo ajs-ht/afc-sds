@@ -29,6 +29,7 @@ include = ["app*"]
 
 [tool.pytest.ini_options]
 addopts = "-m 'not integration'"
+asyncio_mode = "auto"
 markers = [
     "integration: requires a real ANTHROPIC_API_KEY and RUN_INTEGRATION=1",
 ]

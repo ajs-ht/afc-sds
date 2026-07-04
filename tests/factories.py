@@ -48,14 +48,17 @@ def fake_message(*, text: str, stop_reason: str, stop_details=None):
 
 
 class FakeStreamContext:
+    """Stands in for the async context manager returned by
+    AsyncAnthropic().messages.stream(...)."""
+
     def __init__(self, message):
         self._message = message
 
-    def __enter__(self):
+    async def __aenter__(self):
         return self
 
-    def __exit__(self, *exc_info):
+    async def __aexit__(self, *exc_info):
         return False
 
-    def get_final_message(self):
+    async def get_final_message(self):
         return self._message
