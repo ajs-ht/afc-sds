@@ -13,6 +13,8 @@ from app.core.exceptions import (
     ClaudeTruncatedError,
     ClaudeUpstreamError,
 )
+from app.schemas.sds import SDS_JSON_SCHEMA
+from app.services import extraction_service
 from app.services.extraction_service import build_content_block, extract_sds
 from tests.factories import FakeStreamContext, fake_message, minimal_sds_payload
 
@@ -76,13 +78,39 @@ async def test_extract_sds_success_builds_expected_request(settings):
     assert kwargs["model"] == settings.model_id
     assert kwargs["max_tokens"] == settings.max_output_tokens
     assert kwargs["system"][0]["cache_control"] == {"type": "ephemeral"}
-    # No output_config: the full schema exceeds Claude's compiled-grammar size
-    # limit, so the schema is embedded in the (cached) system prompt instead
-    # and enforced by post-hoc Pydantic validation below.
-    assert "output_config" not in kwargs
-    assert "section_1_product_and_company" in kwargs["system"][0]["text"]
+    # Structured outputs enforce the schema at the API level, so the schema
+    # JSON must not also be embedded in the system prompt.
+    assert kwargs["output_config"]["format"]["type"] == "json_schema"
+    assert kwargs["output_config"]["format"]["schema"] == SDS_JSON_SCHEMA
+    assert "section_1_product_and_company" not in kwargs["system"][0]["text"]
     content_blocks = kwargs["messages"][0]["content"]
     assert content_blocks[0]["type"] == "document"
+
+
+async def test_extract_sds_embeds_schema_when_structured_outputs_disabled():
+    settings = Settings(
+        anthropic_api_key="k",
+        api_key="s",
+        model_id="claude-opus-4-8",
+        use_structured_outputs=False,
+    )
+    payload = minimal_sds_payload()
+    message = fake_message(text=json.dumps(payload), stop_reason="end_turn")
+    client = _client_returning(message)
+
+    result = await extract_sds(
+        content=b"%PDF-1.4...",
+        content_type="application/pdf",
+        client=client,
+        settings=settings,
+        request_id="req-1b",
+    )
+
+    # Explicitly disabled (not unavailable) — no warning.
+    assert result.warnings == []
+    _, kwargs = client.messages.stream.call_args
+    assert "output_config" not in kwargs
+    assert "section_1_product_and_company" in kwargs["system"][0]["text"]
 
 
 async def test_extract_sds_strips_wrapping_code_fence(settings):
@@ -99,7 +127,7 @@ async def test_extract_sds_strips_wrapping_code_fence(settings):
         request_id="req-3",
     )
 
-    assert result.data.schema_version == "1.0"
+    assert result.data.schema_version == "2.0"
 
 
 async def test_extract_sds_uses_image_block_for_image_upload(settings):
@@ -186,12 +214,89 @@ async def test_invalid_json_with_other_stop_reason_raises_invalid_response(setti
         )
 
 
-# --- Anthropic SDK exception mapping ---------------------------------------
+# --- structured-outputs grammar-size fallback -------------------------------
 
 
 def _fake_response(status_code: int) -> httpx.Response:
     request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
     return httpx.Response(status_code=status_code, request=request)
+
+
+def _grammar_too_large_error() -> anthropic.BadRequestError:
+    return anthropic.BadRequestError(
+        "The compiled grammar is too large. Please reduce the number of strict tools",
+        response=_fake_response(400),
+        body=None,
+    )
+
+
+async def test_grammar_size_error_falls_back_to_embedded_schema(settings):
+    payload = minimal_sds_payload()
+    message = fake_message(text=json.dumps(payload), stop_reason="end_turn")
+    client = MagicMock()
+    client.messages.stream.side_effect = [
+        _grammar_too_large_error(),
+        FakeStreamContext(message),
+    ]
+
+    result = await extract_sds(
+        content=b"%PDF-1.4...",
+        content_type="application/pdf",
+        client=client,
+        settings=settings,
+        request_id="req-9",
+    )
+
+    assert result.warnings == ["structured_outputs_unavailable"]
+    assert client.messages.stream.call_count == 2
+    _, retry_kwargs = client.messages.stream.call_args
+    assert "output_config" not in retry_kwargs
+    assert "section_1_product_and_company" in retry_kwargs["system"][0]["text"]
+    assert extraction_service._grammar_too_large is True
+
+
+async def test_grammar_size_error_is_remembered_across_requests(settings):
+    payload = minimal_sds_payload()
+    extraction_service._grammar_too_large = True
+
+    message = fake_message(text=json.dumps(payload), stop_reason="end_turn")
+    client = _client_returning(message)
+
+    result = await extract_sds(
+        content=b"%PDF-1.4...",
+        content_type="application/pdf",
+        client=client,
+        settings=settings,
+        request_id="req-10",
+    )
+
+    # Goes straight to the fallback path: one call, no output_config, but the
+    # response still notes that structured outputs were requested and unusable.
+    assert result.warnings == ["structured_outputs_unavailable"]
+    assert client.messages.stream.call_count == 1
+    _, kwargs = client.messages.stream.call_args
+    assert "output_config" not in kwargs
+
+
+async def test_non_grammar_bad_request_does_not_fall_back(settings):
+    client = _client_raising(
+        anthropic.BadRequestError("bad request", response=_fake_response(400), body=None)
+    )
+
+    with pytest.raises(ClaudeUpstreamError):
+        await extract_sds(
+            content=b"data",
+            content_type="application/pdf",
+            client=client,
+            settings=settings,
+            request_id="req-11",
+        )
+
+    assert client.messages.stream.call_count == 1
+    assert extraction_service._grammar_too_large is False
+
+
+# --- Anthropic SDK exception mapping ---------------------------------------
 
 
 @pytest.mark.parametrize(

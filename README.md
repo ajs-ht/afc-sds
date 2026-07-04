@@ -11,6 +11,32 @@ Web UIやCLIは提供せず、他システムから呼び出されるHTTP API専
 - Anthropic Claude API (`claude-opus-4-8`) — PDF/画像のネイティブ入力 + Structured Outputs (`output_config.format`)
 - 認証: `X-API-Key` ヘッダによる簡易認証
 
+### 出力スキーマ (schema_version 2.0)
+
+抽出結果 (`data`) はJIS Z 7253の16項目構成のJSON Schemaに準拠します。
+第1〜3項（製品・会社情報 / 危険有害性の要約 / 組成・成分情報）に加え、
+第8項（ばく露限界値・保護具）、第9項（物理化学的性質）、第14項（国連番号・容器等級）、
+第15項（適用法令）に専用の構造化フィールドがあります。全項目が原文を保持する
+`content_markdown` を持ち、数値系フィールドは範囲・単位の原文表記を保つため文字列型です。
+
+スキーマ本体は `GET /v1/sds/schema` で取得できます（下記API参照）。
+
+> **schema_version 1.0 からの破壊的変更**: 第8/9/14/15項が汎用の
+> `{section_number, section_title_ja, content_markdown}` 形式から構造化フィールド付きの
+> 形式に変わりました（既存フィールドは保持、フィールド追加のみ）。
+
+### 出力の強制方法
+
+出力のスキーマ準拠は二段構えで保証されます。
+
+1. **Structured Outputs** (`output_config.format`) — APIレベルの制約付きデコード（既定で有効）。
+2. **プロンプト埋め込み + Pydantic事後検証** — スキーマのコンパイル済みグラマーが
+   APIのサイズ上限を超えた場合、自動でこちらへフォールバックし、レスポンスの
+   `warnings` に `structured_outputs_unavailable` を付けて通知します。
+   `USE_STRUCTURED_OUTPUTS=false` で最初からこちらの方式に固定できます。
+
+どちらの経路でもレスポンスはPydanticで検証されてから返却されます。
+
 ## セットアップ
 
 ```bash
@@ -84,6 +110,19 @@ RUN_INTEGRATION=1 ANTHROPIC_API_KEY=sk-ant-... \
 | `extraction_refused` | 422 | Claudeが安全上の理由で処理を拒否 |
 | `extraction_truncated` | 502 | 出力がmax_tokensで途中終了しJSON検証に失敗 |
 | `upstream_error` | 500/503 | Anthropic API側のエラー |
+
+### `GET /v1/sds/schema`
+
+- ヘッダ: `X-API-Key: <shared secret>`
+- レスポンス: `{"schema_version": "2.0", "json_schema": {...}}`
+
+抽出結果 `data` のJSON Schemaをそのまま返します。連携先システムはこのスキーマを
+実行時に取得して、受信JSONのバリデーションや型・クラスのコード生成に利用できます。
+`schema_version` が契約のリビジョンを示します。
+
+```bash
+curl http://localhost:8000/v1/sds/schema -H "X-API-Key: <settings.api_key の値>"
+```
 
 ## ログ
 

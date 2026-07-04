@@ -31,8 +31,17 @@ def test_live_extraction_returns_structured_sds(client, auth_headers):
     assert response.status_code == 200, response.text
     body = response.json()
 
-    assert body["data"]["schema_version"] == "1.0"
+    assert body["data"]["schema_version"] == "2.0"
     assert "section_1_product_and_company" in body["data"]
+
+    # The decisive check for structured-outputs viability: if the compiled
+    # grammar exceeded the API's size limit, the service silently fell back
+    # to the prompt-embedded schema and flagged it here. Fail loudly so the
+    # regression (schema grew too big again) is caught, not papered over.
+    assert "structured_outputs_unavailable" not in body["warnings"], (
+        "structured outputs grammar was rejected as too large; "
+        "slim down SDS_JSON_SCHEMA or flip use_structured_outputs off"
+    )
 
     usage = body["usage"]
     print(

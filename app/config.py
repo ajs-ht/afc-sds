@@ -18,6 +18,12 @@ class Settings(BaseSettings):
 
     max_output_tokens: int = 24000
 
+    # Constrained decoding via Claude's structured outputs (output_config.format).
+    # When the compiled grammar exceeds the API's size limit, the service falls
+    # back to the prompt-embedded-schema mode automatically; set this to False
+    # to skip structured outputs entirely.
+    use_structured_outputs: bool = True
+
     log_level: str = "INFO"
     log_format: Literal["text", "json"] = "text"
 
