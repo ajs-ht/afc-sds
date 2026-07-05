@@ -42,6 +42,25 @@ Web UIやCLIは提供せず、他システムから呼び出されるHTTP API専
    再テストできます。
 
 どちらの経路でもレスポンスはPydanticで検証されてから返却されます。
+Pydantic検証に失敗した場合(かつmax_tokens打ち切りでない場合)は自動で1回だけ再抽出
+してから確定させます(再試行時は `warnings` に `retried_invalid_response` を付与、
+`usage` は全呼び出しの合算)。抽出は書き起こしタスクのため `temperature=0`(環境変数
+`TEMPERATURE` で変更可)で決定的に実行されます。
+
+### ドメイン後処理検証 (warnings)
+
+スキーマ検証の後、抽出内容に対する機械的な整合性チェックを行い、疑わしい値を
+`warnings` で通知します(結果自体は全量返却されます。人手レビューへの振り分け用)。
+
+| warning | 意味 |
+|---|---|
+| `invalid_cas_number:<値>` | CAS番号の形式またはチェックディジットが不正 |
+| `unknown_pictogram:<値>` | ピクトグラムが標準語彙 (GHS01〜GHS09) 外 |
+| `invalid_ghs_code:<値>` | 危険有害性情報/注意書きの先頭がHコード/Pコード様だが形式不正 |
+| `invalid_un_number:<値>` | 国連番号が4桁形式 (`1230` / `UN1230`) でない |
+| `retried_invalid_response` | 初回応答がスキーマ検証に失敗し、1回の自動再試行で回復 |
+| `output_truncated_max_tokens` | 出力がmax_tokensで打ち切られた(JSON自体は有効) |
+| `structured_outputs_unavailable` | Structured Outputs要求がグラマー上限超過でフォールバック |
 
 ## セットアップ
 
@@ -91,6 +110,16 @@ RUN_INTEGRATION=1 ANTHROPIC_API_KEY=sk-ant-... \
 - 生成されたJSONは `tests/fixtures/real_world/_results/<ファイル名>.json` に書き出され、目視で確認できます。
 - サンプルファイル自体・生成結果はいずれもgitignore対象で、コミットされません（SDSは配布元の著作物のため）。
 - サンプルが1件も無い場合はテストが失敗ではなくスキップされるため、通常の開発/CIには影響しません。
+
+#### フィールド単位の精度測定
+
+サンプルの隣に正解データ `<ファイル名>.expected.json`（抽出結果 `data` と同じ形。
+検証済みフィールドだけの部分ドキュメントで可）を置くと、構造化フィールドを
+フラット化して突合したフィールド単位の一致率レポートが出力され、
+`_results/<ファイル名>.accuracy.json` に書き出されます。原文保持用の
+`content_markdown` / `raw_text` は表記揺れがあるため採点対象外です。
+プロンプトやモデルの変更前後で精度を定量比較する用途を想定しています
+（レポートのみで、一致率によってテストが失敗することはありません）。
 
 ## API
 

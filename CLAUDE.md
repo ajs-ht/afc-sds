@@ -19,7 +19,9 @@ pytest tests/test_extraction_service.py::test_name   # run one test
 RUN_INTEGRATION=1 ANTHROPIC_API_KEY=sk-ant-... pytest -m integration
 
 # Real-world SDS sample verification (drop PDFs/images into tests/fixtures/real_world/ first;
-# results are written to tests/fixtures/real_world/_results/ — both are gitignored)
+# results are written to tests/fixtures/real_world/_results/ — both are gitignored).
+# Optional: put <name>.expected.json ground truth next to a sample to get a
+# field-level accuracy report in _results/<name>.accuracy.json.
 RUN_INTEGRATION=1 ANTHROPIC_API_KEY=sk-ant-... pytest -m integration tests/integration/test_real_world_extraction.py -s
 
 # Run the server
@@ -36,8 +38,9 @@ Request flow for `POST /v1/sds/extract`:
 1. `app/main.py` — middleware assigns a `request_id` (returned as `X-Request-ID`, threaded through all logs and error bodies) and a single `AppError` exception handler renders every error as `{"error": {"type", "message", "request_id"}}`.
 2. `app/dependencies.py` — `X-API-Key` shared-secret auth (constant-time compare), applied router-wide in `app/api/v1/router.py`.
 3. `app/validation/file_validation.py` — size/MIME/PDF-page-count checks (Content-Length pre-check before buffering, then re-check after read).
-4. `app/services/extraction_service.py` — sends the file to Claude (base64 document/image block) and validates the response with Pydantic. **Always streams** (`client.messages.stream`) so long extractions never trip the SDK's non-streaming timeout, and uses `AsyncAnthropic` so the event loop isn't blocked.
-5. `app/schemas/sds.py` — `SDSDocument`, the 16-section output model. `SDS_JSON_SCHEMA` is computed once at import time.
+4. `app/services/extraction_service.py` — sends the file to Claude (base64 document/image block, `temperature=0`) and validates the response with Pydantic; a validation failure not caused by max_tokens truncation is retried once (`retried_invalid_response` warning, usage summed across both calls). **Always streams** (`client.messages.stream`) so long extractions never trip the SDK's non-streaming timeout, and uses `AsyncAnthropic` so the event loop isn't blocked.
+5. `app/services/postvalidation.py` — deterministic domain checks on the validated document (CAS check digit, GHS01–09 pictogram vocabulary, leading H/P-code format, UN-number format); violations become `warnings` entries, never rejections. New warning kinds also go in the README warnings table.
+6. `app/schemas/sds.py` — `SDSDocument`, the 16-section output model. `SDS_JSON_SCHEMA` is computed once at import time.
 
 ### Output enforcement: two-tier with automatic fallback
 
