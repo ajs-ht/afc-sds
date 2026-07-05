@@ -130,7 +130,7 @@ def test_null_un_number_is_not_checked():
 
 @pytest.mark.parametrize(
     "value",
-    ["非開示", "非該当", "不明", "企業秘密", "データなし", "記載なし"],
+    ["非開示", "非該当", "不明", "企業秘密", "データなし", "記載なし", "なし", "―", "-", "－", "／"],
 )
 def test_explicit_absence_cas_values_are_not_flagged(value):
     doc = _doc(
@@ -141,7 +141,7 @@ def test_explicit_absence_cas_values_are_not_flagged(value):
 
 @pytest.mark.parametrize(
     "value",
-    ["非該当", "分類基準に該当しない", "該当なし", "適用外", "対象外", "非該当（国連分類）"],
+    ["非該当", "分類基準に該当しない", "該当なし", "適用外", "対象外", "非該当（国連分類）", "―"],
 )
 def test_explicit_absence_un_values_are_not_flagged(value):
     doc = _doc(section_14_transport={"un_number": value})

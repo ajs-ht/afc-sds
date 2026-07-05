@@ -34,13 +34,15 @@ _EXPLICIT_ABSENCE_MARKERS = (
     "非開示",
     "適用外",
     "対象外",
-    "データなし",
-    "情報なし",
-    "記載なし",
+    "なし",
     "不明",
     "企業秘密",
     "営業秘密",
 )
+
+# Table cells whose whole content is dash-like punctuation (―, -, /, …)
+# are the symbolic spelling of the same "no value" convention.
+_SYMBOLIC_ABSENCE_RE = re.compile(r"[-‐‑–—―ー−－─=~〜/／・.,、。…]+")
 
 _CAS_RE = re.compile(r"(\d{2,7})-(\d{2})-(\d)")
 
@@ -92,6 +94,8 @@ def collect_domain_warnings(doc: SDSDocument) -> list[str]:
 
 def _is_explicit_absence(value: str) -> bool:
     normalized = re.sub(r"\s+", "", value)
+    if _SYMBOLIC_ABSENCE_RE.fullmatch(normalized):
+        return True
     return any(marker in normalized for marker in _EXPLICIT_ABSENCE_MARKERS)
 
 

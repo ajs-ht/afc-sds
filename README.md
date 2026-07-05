@@ -69,9 +69,10 @@ Pydantic検証に失敗した場合(かつmax_tokens打ち切りでない場合)
 | `output_truncated_max_tokens` | 出力がmax_tokensで打ち切られた(JSON自体は有効) |
 | `structured_outputs_unavailable` | Structured Outputs要求がグラマー上限超過でフォールバック |
 
-原文に明記された欠落表記（「非該当」「該当しない」「非開示」「適用外」「データなし」
-「不明」など）がCAS番号・国連番号欄に転記されている場合は、忠実な転記として扱い
-`invalid_cas_number` / `invalid_un_number` の警告対象**外**です。
+原文に明記された欠落表記（「非該当」「該当しない」「非開示」「適用外」「〜なし」
+「不明」、および「―」「-」等の記号のみのセル表記など）がCAS番号・国連番号欄に
+転記されている場合は、忠実な転記として扱い `invalid_cas_number` / `invalid_un_number`
+の警告対象**外**です。
 
 ## セットアップ
 
