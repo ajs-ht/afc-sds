@@ -137,7 +137,7 @@ async def test_extract_sds_strips_wrapping_code_fence(settings):
         request_id="req-3",
     )
 
-    assert result.data.schema_version == "2.0"
+    assert result.data.schema_version == "2.1"
 
 
 async def test_extract_sds_uses_image_block_for_image_upload(settings):
@@ -292,6 +292,29 @@ async def test_refusal_on_retry_raises_refusal_error(settings):
             settings=settings,
             request_id="req-6d",
         )
+
+
+# --- multi-SDS detection ------------------------------------------------------
+
+
+async def test_additional_documents_add_detection_warning(settings):
+    payload = minimal_sds_payload()
+    payload["additional_documents"] = [
+        {"product_name": "B剤", "start_page": 6, "end_page": 11}
+    ]
+    message = fake_message(text=json.dumps(payload), stop_reason="end_turn")
+    client = _client_returning(message)
+
+    result = await extract_sds(
+        content=b"data",
+        content_type="application/pdf",
+        client=client,
+        settings=settings,
+        request_id="req-6f",
+    )
+
+    assert result.warnings == ["additional_sds_documents_detected"]
+    assert result.data.additional_documents[0].start_page == 6
 
 
 # --- domain post-validation warnings ----------------------------------------

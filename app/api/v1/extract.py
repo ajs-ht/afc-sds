@@ -1,12 +1,16 @@
 import anthropic
-from fastapi import APIRouter, Depends, Request, UploadFile, File
+from fastapi import APIRouter, Depends, Form, Request, UploadFile, File
 
 from app.config import Settings, get_settings
 from app.dependencies import verify_api_key
 from app.schemas.responses import ErrorResponse, SDSExtractionResponse
 from app.services.claude_client import get_claude_client
 from app.services.extraction_service import extract_sds
-from app.validation.file_validation import check_content_length, validate_upload
+from app.validation.file_validation import (
+    check_content_length,
+    slice_pdf_pages,
+    validate_upload,
+)
 
 router = APIRouter(dependencies=[Depends(verify_api_key)])
 
@@ -17,7 +21,7 @@ ERROR_RESPONSES = {
         "model": ErrorResponse,
         "description": (
             "Invalid upload: unsupported_file_type / file_too_large / "
-            "too_many_pages / empty_file"
+            "too_many_pages / empty_file / invalid_page_range"
         ),
     },
     401: {"model": ErrorResponse, "description": "Invalid or missing X-API-Key (unauthorized)"},
@@ -47,6 +51,14 @@ ERROR_RESPONSES = {
 async def extract_sds_endpoint(
     request: Request,
     file: UploadFile = File(...),
+    pages: str | None = Form(
+        default=None,
+        description=(
+            'Optional 1-based page selection for PDF uploads: "6" or "6-11" '
+            "(inclusive). Use it to re-extract the further SDS documents "
+            "reported in `additional_documents` of a multi-SDS file."
+        ),
+    ),
     settings: Settings = Depends(get_settings),
     client: anthropic.AsyncAnthropic = Depends(get_claude_client),
 ) -> SDSExtractionResponse:
@@ -54,6 +66,9 @@ async def extract_sds_endpoint(
     check_content_length(request.headers.get("content-length"), settings=settings)
 
     content = await file.read()
+
+    if pages is not None:
+        content = slice_pdf_pages(content, file.content_type, pages)
 
     validate_upload(content=content, content_type=file.content_type, settings=settings)
 

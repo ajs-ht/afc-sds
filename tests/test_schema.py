@@ -10,9 +10,23 @@ from tests.factories import minimal_sds_payload
 def test_sds_document_instantiates_with_minimal_data():
     doc = SDSDocument.model_validate(minimal_sds_payload())
 
-    assert doc.schema_version == "2.0"
+    assert doc.schema_version == "2.1"
     assert doc.section_4_first_aid.section_title_ja == "応急措置"
+    assert doc.additional_documents == []
     assert doc.extraction_notes is None
+
+
+def test_additional_documents_accepts_detected_entries():
+    payload = minimal_sds_payload()
+    payload["additional_documents"] = [
+        {"product_name": "スーパーMD シール B剤", "start_page": 6, "end_page": 11}
+    ]
+
+    doc = SDSDocument.model_validate(payload)
+
+    assert doc.additional_documents[0].product_name == "スーパーMD シール B剤"
+    assert doc.additional_documents[0].start_page == 6
+    assert doc.additional_documents[0].end_page == 11
 
 
 def test_sds_document_instantiates_with_full_data():

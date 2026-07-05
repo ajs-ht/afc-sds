@@ -30,6 +30,7 @@ PDF_MIME_TYPE = "application/pdf"
 
 STRUCTURED_OUTPUTS_UNAVAILABLE_WARNING = "structured_outputs_unavailable"
 RETRIED_INVALID_RESPONSE_WARNING = "retried_invalid_response"
+ADDITIONAL_SDS_DOCUMENTS_WARNING = "additional_sds_documents_detected"
 
 # Set to True the first time the API rejects our schema with a compiled-grammar
 # size error, so subsequent requests go straight to the prompt-embedded-schema
@@ -112,6 +113,10 @@ async def extract_sds(
         warnings.append(RETRIED_INVALID_RESPONSE_WARNING)
     if settings.use_structured_outputs and not structured:
         warnings.append(STRUCTURED_OUTPUTS_UNAVAILABLE_WARNING)
+    if parsed.additional_documents:
+        # Multi-SDS file: only the first SDS was extracted. Callers re-fetch
+        # the rest via the `pages` form field using the reported page ranges.
+        warnings.append(ADDITIONAL_SDS_DOCUMENTS_WARNING)
     warnings.extend(collect_domain_warnings(parsed))
 
     return SDSExtractionResponse(

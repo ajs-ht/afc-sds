@@ -31,7 +31,7 @@ def test_live_extraction_returns_structured_sds(client, auth_headers):
     assert response.status_code == 200, response.text
     body = response.json()
 
-    assert body["data"]["schema_version"] == "2.0"
+    assert body["data"]["schema_version"] == "2.1"
     assert "section_1_product_and_company" in body["data"]
 
     # Trivially true while USE_STRUCTURED_OUTPUTS is off (the default). Its

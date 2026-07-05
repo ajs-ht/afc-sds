@@ -11,7 +11,7 @@ Web UIやCLIは提供せず、他システムから呼び出されるHTTP API専
 - Anthropic Claude API (`claude-opus-4-8`) — PDF/画像のネイティブ入力 + Structured Outputs (`output_config.format`)
 - 認証: `X-API-Key` ヘッダによる簡易認証
 
-### 出力スキーマ (schema_version 2.0)
+### 出力スキーマ (schema_version 2.1)
 
 抽出結果 (`data`) はJIS Z 7253の16項目構成のJSON Schemaに準拠します。
 第1〜3項（製品・会社情報 / 危険有害性の要約 / 組成・成分情報）に加え、
@@ -21,6 +21,11 @@ Web UIやCLIは提供せず、他システムから呼び出されるHTTP API専
 
 スキーマ本体は `GET /v1/sds/schema` で取得できます（下記API参照）。
 
+> **schema_version 2.0 → 2.1 の変更（追加のみ・後方互換）**: 1つのファイルに複数のSDSが
+> 含まれる場合に2件目以降の所在を報告する `additional_documents`
+> （`{product_name, start_page, end_page}` の配列、通常は空）が追加されました。
+> 詳細は下記「複数SDSを含むファイルの扱い」参照。
+>
 > **schema_version 1.0 からの破壊的変更**: 第8/9/14/15項が汎用の
 > `{section_number, section_title_ja, content_markdown}` 形式から構造化フィールド付きの
 > 形式に変わりました（既存フィールドは保持、フィールド追加のみ）。
@@ -59,9 +64,14 @@ Pydantic検証に失敗した場合(かつmax_tokens打ち切りでない場合)
 | `unknown_pictogram:<値>` | ピクトグラムが標準語彙 (GHS01〜GHS09) 外 |
 | `invalid_ghs_code:<値>` | 危険有害性情報/注意書きの先頭がHコード/Pコード様だが形式不正 |
 | `invalid_un_number:<値>` | 国連番号が4桁形式 (`1230` / `UN1230`) でない |
+| `additional_sds_documents_detected` | ファイル内に2件目以降のSDSを検出（`data.additional_documents` 参照） |
 | `retried_invalid_response` | 初回応答がスキーマ検証に失敗し、1回の自動再試行で回復 |
 | `output_truncated_max_tokens` | 出力がmax_tokensで打ち切られた(JSON自体は有効) |
 | `structured_outputs_unavailable` | Structured Outputs要求がグラマー上限超過でフォールバック |
+
+原文に明記された欠落表記（「非該当」「該当しない」「非開示」「適用外」「データなし」
+「不明」など）がCAS番号・国連番号欄に転記されている場合は、忠実な転記として扱い
+`invalid_cas_number` / `invalid_un_number` の警告対象**外**です。
 
 ## セットアップ
 
@@ -128,11 +138,33 @@ RUN_INTEGRATION=1 ANTHROPIC_API_KEY=sk-ant-... \
 
 - ヘッダ: `X-API-Key: <shared secret>`
 - リクエスト: `multipart/form-data`、`file` フィールドにPDFまたは画像（PNG/JPEG/WebP）
+- 任意フォームフィールド `pages`: PDFの抽出対象ページを1始まり・両端含む形式で指定
+  （`"6"` または `"6-11"`）。指定ページのみを切り出してから抽出します。PDF以外への
+  指定・形式不正・範囲外は `invalid_page_range` (400) になります。
 - レスポンス: JIS Z 7253 16項目の構造化JSON（`data`）+ `warnings` + `usage`（トークン使用量）
 
 すべてのレスポンスに `X-Request-ID` ヘッダが付与されます。この値はサーバーログ
 (アクセスログ・トークン使用量ログ)の `request_id` と一致するため、問い合わせ時の
 突合に利用できます。
+
+#### 複数SDSを含むファイルの扱い
+
+1つのPDFに複数製品のSDSが連結されている場合、抽出対象は**常に先頭の1件**です。
+2件目以降は `data.additional_documents` に製品名とページ範囲
+（`{product_name, start_page, end_page}`、1始まり・両端含む）が報告され、
+`warnings` に `additional_sds_documents_detected` が付きます。
+
+連携先システムは次のループで全SDSを取得できます:
+
+1. `POST /v1/sds/extract` でファイルを送信（1件目の抽出結果を取得）
+2. `warnings` に `additional_sds_documents_detected` があれば、
+   `data.additional_documents` の各エントリについて
+   `pages=<start_page>-<end_page>` を付けて同じファイルを再POST
+3. すべてのエントリを処理したら完了
+
+> ページ範囲はモデルが文書構造から推定した値のため、稀に±1ページ程度の誤差が
+> あり得ます。再抽出結果の `extraction_notes` に前後の文書の混入が示唆される場合は
+> 範囲を1ページ広げて再試行してください。
 
 エラー時は `{"error": {"type": "...", "message": "...", "request_id": "..."}}` 形式で返却されます。
 主なエラー種別:
@@ -143,6 +175,7 @@ RUN_INTEGRATION=1 ANTHROPIC_API_KEY=sk-ant-... \
 | `unsupported_file_type` | 400 | 非対応のファイル形式 |
 | `file_too_large` | 400 | アップロードサイズ超過 |
 | `too_many_pages` | 400 | PDFページ数超過 |
+| `invalid_page_range` | 400 | `pages` の形式不正・範囲外・PDF以外への指定 |
 | `extraction_refused` | 422 | Claudeが安全上の理由で処理を拒否 |
 | `extraction_truncated` | 502 | 出力がmax_tokensで途中終了しJSON検証に失敗 |
 | `upstream_error` | 500/503 | Anthropic API側のエラー |
@@ -150,7 +183,7 @@ RUN_INTEGRATION=1 ANTHROPIC_API_KEY=sk-ant-... \
 ### `GET /v1/sds/schema`
 
 - ヘッダ: `X-API-Key: <shared secret>`
-- レスポンス: `{"schema_version": "2.0", "json_schema": {...}}`
+- レスポンス: `{"schema_version": "2.1", "json_schema": {...}}`
 
 抽出結果 `data` のJSON Schemaをそのまま返します。連携先システムはこのスキーマを
 実行時に取得して、受信JSONのバリデーションや型・クラスのコード生成に利用できます。

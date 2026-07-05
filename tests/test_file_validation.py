@@ -1,13 +1,21 @@
+import io
+
 import pytest
+from pypdf import PdfReader, PdfWriter
 
 from app.config import Settings
 from app.core.exceptions import (
     EmptyFileError,
     FileTooLargeError,
+    InvalidPageRangeError,
     TooManyPagesError,
     UnsupportedFileTypeError,
 )
-from app.validation.file_validation import check_content_length, validate_upload
+from app.validation.file_validation import (
+    check_content_length,
+    slice_pdf_pages,
+    validate_upload,
+)
 
 
 @pytest.fixture
@@ -58,6 +66,50 @@ def test_pdf_page_count_over_limit_rejected(sample_pdf_bytes, settings):
     settings = settings.model_copy(update={"max_pdf_pages": 0})
     with pytest.raises(TooManyPagesError):
         validate_upload(content=sample_pdf_bytes, content_type="application/pdf", settings=settings)
+
+
+# --- slice_pdf_pages ---------------------------------------------------------
+
+
+def _pdf_with_pages(count: int) -> bytes:
+    writer = PdfWriter()
+    for _ in range(count):
+        writer.add_blank_page(width=595, height=842)
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    return buffer.getvalue()
+
+
+def test_slice_pdf_pages_range():
+    sliced = slice_pdf_pages(_pdf_with_pages(11), "application/pdf", "6-11")
+    assert len(PdfReader(io.BytesIO(sliced)).pages) == 6
+
+
+def test_slice_pdf_pages_single_page():
+    sliced = slice_pdf_pages(_pdf_with_pages(3), "application/pdf", "2")
+    assert len(PdfReader(io.BytesIO(sliced)).pages) == 1
+
+
+def test_slice_pdf_pages_full_range():
+    sliced = slice_pdf_pages(_pdf_with_pages(3), "application/pdf", "1-3")
+    assert len(PdfReader(io.BytesIO(sliced)).pages) == 3
+
+
+@pytest.mark.parametrize("spec", ["0", "abc", "5-2", "1-", "-3", "1,3", ""])
+def test_slice_pdf_pages_malformed_spec_rejected(spec):
+    with pytest.raises(InvalidPageRangeError):
+        slice_pdf_pages(_pdf_with_pages(5), "application/pdf", spec)
+
+
+@pytest.mark.parametrize("spec", ["6", "2-6", "0-3"])
+def test_slice_pdf_pages_out_of_bounds_rejected(spec):
+    with pytest.raises(InvalidPageRangeError):
+        slice_pdf_pages(_pdf_with_pages(5), "application/pdf", spec)
+
+
+def test_slice_pdf_pages_rejected_for_non_pdf():
+    with pytest.raises(InvalidPageRangeError):
+        slice_pdf_pages(b"\x89PNG...", "image/png", "1-2")
 
 
 def test_check_content_length_rejects_oversized_header(settings):

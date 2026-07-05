@@ -21,6 +21,27 @@ from app.schemas.sds import SDSDocument
 # these; anything else is fabricated or misread.
 _PICTOGRAM_VOCAB = frozenset(f"GHS{n:02d}" for n in range(1, 10))
 
+# Explicit-absence notations commonly written in Japanese SDS where a value
+# would otherwise go (非該当, 非開示, 分類基準に該当しない, ...). The model
+# transcribes them verbatim per the prompt, so a CAS/UN field holding one is
+# faithful transcription, not a misread — don't warn on it. Matched as a
+# substring of the whitespace-stripped value so composed phrases hit too.
+_EXPLICIT_ABSENCE_MARKERS = (
+    "非該当",
+    "該当しない",
+    "該当なし",
+    "該当せず",
+    "非開示",
+    "適用外",
+    "対象外",
+    "データなし",
+    "情報なし",
+    "記載なし",
+    "不明",
+    "企業秘密",
+    "営業秘密",
+)
+
 _CAS_RE = re.compile(r"(\d{2,7})-(\d{2})-(\d)")
 
 # 国連番号: 4 digits, optionally prefixed with "UN" ("1230" / "UN1230" / "UN 1230").
@@ -45,7 +66,7 @@ def collect_domain_warnings(doc: SDSDocument) -> list[str]:
 
     for ingredient in doc.section_3_composition.ingredients:
         cas = (ingredient.cas_number or "").strip()
-        if cas and not _is_valid_cas(cas):
+        if cas and not _is_explicit_absence(cas) and not _is_valid_cas(cas):
             warnings.append(f"invalid_cas_number:{_clip(cas)}")
 
     hazards = doc.section_2_hazards_identification
@@ -59,10 +80,19 @@ def collect_domain_warnings(doc: SDSDocument) -> list[str]:
             warnings.append(f"invalid_ghs_code:{_clip(malformed)}")
 
     un_number = (doc.section_14_transport.un_number or "").strip()
-    if un_number and not _UN_NUMBER_RE.fullmatch(un_number):
+    if (
+        un_number
+        and not _is_explicit_absence(un_number)
+        and not _UN_NUMBER_RE.fullmatch(un_number)
+    ):
         warnings.append(f"invalid_un_number:{_clip(un_number)}")
 
     return warnings
+
+
+def _is_explicit_absence(value: str) -> bool:
+    normalized = re.sub(r"\s+", "", value)
+    return any(marker in normalized for marker in _EXPLICIT_ABSENCE_MARKERS)
 
 
 def _is_valid_cas(cas: str) -> bool:

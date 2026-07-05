@@ -1,17 +1,22 @@
 import io
+import re
 
-from pypdf import PdfReader
+from pypdf import PdfReader, PdfWriter
 from pypdf.errors import PdfReadError
 
 from app.config import Settings
 from app.core.exceptions import (
     EmptyFileError,
     FileTooLargeError,
+    InvalidPageRangeError,
     TooManyPagesError,
     UnsupportedFileTypeError,
 )
 
 PDF_MIME_TYPE = "application/pdf"
+
+# `pages` form field: "6" (one page) or "6-11" (inclusive range), 1-based.
+_PAGES_SPEC_RE = re.compile(r"^\s*(\d+)\s*(?:-\s*(\d+)\s*)?$")
 
 
 def check_content_length(content_length_header: str | None, *, settings: Settings) -> None:
@@ -75,6 +80,51 @@ def validate_upload(
                 page_count=page_count,
                 max_pages=settings.max_pdf_pages,
             )
+
+
+def slice_pdf_pages(content: bytes, content_type: str | None, pages_spec: str) -> bytes:
+    """Return a new PDF containing only the pages named by `pages_spec`.
+
+    `pages_spec` is "N" or "N-M" (1-based, inclusive) — the format callers
+    get back in `additional_documents` for multi-SDS files. Raises
+    InvalidPageRangeError for a non-PDF upload, a malformed spec, or a range
+    outside the document.
+    """
+
+    if content_type != PDF_MIME_TYPE:
+        raise InvalidPageRangeError(
+            "The `pages` parameter is only supported for PDF uploads.",
+            content_type=content_type,
+        )
+
+    match = _PAGES_SPEC_RE.fullmatch(pages_spec)
+    if not match:
+        raise InvalidPageRangeError(
+            f"Invalid `pages` value: {pages_spec!r}. Use \"6\" or \"6-11\" (1-based, inclusive).",
+            pages=pages_spec,
+        )
+    start = int(match.group(1))
+    end = int(match.group(2)) if match.group(2) else start
+
+    try:
+        reader = PdfReader(io.BytesIO(content))
+    except PdfReadError as exc:
+        raise UnsupportedFileTypeError(f"Could not parse PDF: {exc}") from exc
+
+    page_count = len(reader.pages)
+    if not (1 <= start <= end <= page_count):
+        raise InvalidPageRangeError(
+            f"Page range {start}-{end} is out of bounds for a {page_count}-page PDF.",
+            pages=pages_spec,
+            page_count=page_count,
+        )
+
+    writer = PdfWriter()
+    for index in range(start - 1, end):
+        writer.add_page(reader.pages[index])
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    return buffer.getvalue()
 
 
 def _count_pdf_pages(content: bytes) -> int:

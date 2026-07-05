@@ -115,7 +115,7 @@ def test_valid_un_numbers_pass(un):
     assert collect_domain_warnings(doc) == []
 
 
-@pytest.mark.parametrize("un", ["123", "12345", "UNX123", "非該当?"])
+@pytest.mark.parametrize("un", ["123", "12345", "UNX123"])
 def test_invalid_un_numbers_warn(un):
     doc = _doc(section_14_transport={"un_number": un})
     assert collect_domain_warnings(doc) == [f"invalid_un_number:{un}"]
@@ -123,6 +123,35 @@ def test_invalid_un_numbers_warn(un):
 
 def test_null_un_number_is_not_checked():
     assert collect_domain_warnings(_doc(section_14_transport={"un_number": None})) == []
+
+
+# --- explicit-absence notations (許容リスト) -----------------------------------
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["非開示", "非該当", "不明", "企業秘密", "データなし", "記載なし"],
+)
+def test_explicit_absence_cas_values_are_not_flagged(value):
+    doc = _doc(
+        section_3_composition={"ingredients": [{"substance_name": "x", "cas_number": value}]}
+    )
+    assert collect_domain_warnings(doc) == []
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["非該当", "分類基準に該当しない", "該当なし", "適用外", "対象外", "非該当（国連分類）"],
+)
+def test_explicit_absence_un_values_are_not_flagged(value):
+    doc = _doc(section_14_transport={"un_number": value})
+    assert collect_domain_warnings(doc) == []
+
+
+def test_absence_marker_does_not_mask_a_real_invalid_value():
+    # Values that merely *fail* the format without an absence marker still warn.
+    doc = _doc(section_14_transport={"un_number": "UN12345"})
+    assert collect_domain_warnings(doc) == ["invalid_un_number:UN12345"]
 
 
 # --- aggregation ----------------------------------------------------------------
