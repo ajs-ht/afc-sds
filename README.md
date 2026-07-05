@@ -11,6 +11,23 @@ Web UIやCLIは提供せず、他システムから呼び出されるHTTP API専
 - Anthropic Claude API (`claude-opus-4-8`) — PDF/画像のネイティブ入力 + Structured Outputs (`output_config.format`)
 - 認証: `X-API-Key` ヘッダによる簡易認証
 
+### アーキテクチャ概要
+
+`POST /v1/sds/extract` のリクエストは次の順に処理されます。
+
+1. `app/main.py` — ミドルウェアが `request_id` を採番（レスポンスの `X-Request-ID` として返却、
+   全ログ・エラー本文に伝播）し、例外は一箇所の `AppError` ハンドラで統一形式に変換します。
+2. `app/dependencies.py` — `X-API-Key` の定時間比較による認証。
+3. `app/validation/file_validation.py` — サイズ/MIME/PDFページ数の検証と、`pages`
+   フォームフィールドによるページ切り出し。
+4. `app/services/extraction_service.py` — Claude呼び出し、Pydanticによるスキーマ検証、
+   検証失敗時の1回だけの自動再試行。
+5. `app/services/postvalidation.py` — CAS番号やGHSピクトグラム等のドメイン固有チェック
+   （`warnings` として通知、拒否はしない）。
+6. `app/schemas/sds.py` — 出力の型定義 (`SDSDocument`) とJSON Schema。
+
+より実装レベルの詳細はエージェント向けの `CLAUDE.md` を参照してください。
+
 ### 出力スキーマ (schema_version 2.1)
 
 抽出結果 (`data`) はJIS Z 7253の16項目構成のJSON Schemaに準拠します。
@@ -76,15 +93,42 @@ Pydantic検証に失敗した場合(かつmax_tokens打ち切りでない場合)
 
 ## セットアップ
 
+`.env` はClaude APIキーやアップロード制限などアプリの実行時設定を保持します。
+
 ```bash
 cp .env.example .env
 # .env を編集して ANTHROPIC_API_KEY / API_KEY を設定
 ```
 
+主な環境変数（既定値は `.env.example` 参照）:
+
+| 変数 | 既定値 | 説明 |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | (必須) | Claude呼び出しに使うAnthropic APIキー |
+| `MODEL_ID` | `claude-opus-4-8` | 抽出に使うClaudeモデル |
+| `API_KEY` | (必須) | クライアントが `X-API-Key` ヘッダで送る共有シークレット |
+| `MAX_UPLOAD_MB` | `32` | アップロードファイルサイズ上限(MB) |
+| `MAX_PDF_PAGES` | `50` | PDFの許容ページ数上限 |
+| `MAX_OUTPUT_TOKENS` | `24000` | 1回の抽出でClaudeが生成できる最大トークン数 |
+| `USE_STRUCTURED_OUTPUTS` | `false` | Structured Outputsへのオプトイン（上記「出力の強制方法」参照） |
+| `LOG_LEVEL` | `INFO` | ログレベル |
+| `LOG_FORMAT` | `text` | `text` または `json`（下記「ログ」参照） |
+
+このほか、許可するアップロードのMIMEタイプ (`application/pdf` / `image/png` / `image/jpeg` /
+`image/webp`) は `app/config.py` の `allowed_mime_types` にハードコードされており、対応する
+環境変数はありません（変更する場合はコードを編集してください）。
+
 ### ローカル実行 (Docker)
 
 ```bash
 docker compose up --build
+```
+
+Dockerを使わない場合は、依存関係インストール後にuvicornで直接起動できます。
+
+```bash
+pip install -e ".[dev]"
+uvicorn app.main:app
 ```
 
 ### 動作確認
@@ -93,6 +137,15 @@ docker compose up --build
 curl -X POST http://localhost:8000/v1/sds/extract \
   -H "X-API-Key: <settings.api_key の値>" \
   -F "file=@sample_sds.pdf"
+```
+
+多SDS文書の2件目以降を `pages` 指定で再抽出する場合:
+
+```bash
+curl -X POST http://localhost:8000/v1/sds/extract \
+  -H "X-API-Key: <settings.api_key の値>" \
+  -F "file=@sample_sds.pdf" \
+  -F "pages=6-11"
 ```
 
 ヘルスチェック（認証不要）:
@@ -105,9 +158,11 @@ curl http://localhost:8000/healthz
 
 ```bash
 pip install -e ".[dev]"
-pytest                              # ユニットテスト（実APIキー不要）
-RUN_INTEGRATION=1 pytest -m integration   # 統合テスト（実ANTHROPIC_API_KEYが必要）
+pytest                              # ユニットテスト（実APIキー不要。デフォルトのpytest実行対象）
+RUN_INTEGRATION=1 pytest -m integration   # 統合テスト（実ANTHROPIC_API_KEYが必要。実APIを呼ぶため既定では除外）
 ```
+
+リンタ・フォーマッタは導入していません。
 
 ### 実世界のSDSサンプルによる検証
 

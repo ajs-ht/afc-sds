@@ -1,3 +1,18 @@
+"""Send an SDS file to Claude and return a schema-validated result.
+
+Output enforcement is two-tier: structured outputs (output_config.format)
+constrain decoding at the API level when enabled and the compiled grammar
+fits within the API's size limit; otherwise (or when disabled) the schema is
+embedded in the system prompt instead, and the response is validated with
+Pydantic either way. A structured-outputs request that first hits the
+grammar-size limit falls back to the prompt-embedded schema automatically
+and flips the process-local `_grammar_too_large` flag so later requests skip
+straight to the fallback. A response that fails Pydantic validation (and
+wasn't truncated by max_tokens) is retried once before giving up. See
+app/services/prompts.py for why structured outputs currently can't host the
+full SDS schema.
+"""
+
 import base64
 import logging
 import re
