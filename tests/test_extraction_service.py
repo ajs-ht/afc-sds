@@ -88,6 +88,8 @@ async def test_extract_sds_success_builds_expected_request(settings):
     _, kwargs = client.messages.stream.call_args
     assert kwargs["model"] == settings.model_id
     assert kwargs["max_tokens"] == settings.max_output_tokens
+    # Sampling params are removed on Opus 4.7+ — sending temperature is a 400.
+    assert "temperature" not in kwargs
     assert kwargs["system"][0]["cache_control"] == {"type": "ephemeral"}
     # Default mode: structured outputs are off (the SDS schema exceeds the
     # API's compiled-grammar limits — see prompts.py), so the schema is
@@ -135,7 +137,7 @@ async def test_extract_sds_strips_wrapping_code_fence(settings):
         request_id="req-3",
     )
 
-    assert result.data.schema_version == "2.0"
+    assert result.data.schema_version == "2.1"
 
 
 async def test_extract_sds_uses_image_block_for_image_upload(settings):
@@ -208,7 +210,7 @@ async def test_max_tokens_with_valid_json_returns_warning(settings):
     assert result.warnings == ["output_truncated_max_tokens"]
 
 
-async def test_invalid_json_with_other_stop_reason_raises_invalid_response(settings):
+async def test_invalid_json_is_retried_once_then_raises(settings):
     message = fake_message(text="not json at all", stop_reason="end_turn")
     client = _client_returning(message)
 
@@ -220,6 +222,125 @@ async def test_invalid_json_with_other_stop_reason_raises_invalid_response(setti
             settings=settings,
             request_id="req-6",
         )
+
+    # One automatic retry before giving up with extraction_invalid_response.
+    assert client.messages.stream.call_count == 2
+
+
+# --- invalid-response retry --------------------------------------------------
+
+
+async def test_invalid_json_retry_success_adds_warning_and_sums_usage(settings):
+    payload = minimal_sds_payload()
+    client = MagicMock()
+    client.messages.stream.side_effect = [
+        FakeStreamContext(fake_message(text="not json at all", stop_reason="end_turn")),
+        FakeStreamContext(fake_message(text=json.dumps(payload), stop_reason="end_turn")),
+    ]
+
+    result = await extract_sds(
+        content=b"data",
+        content_type="application/pdf",
+        client=client,
+        settings=settings,
+        request_id="req-6b",
+    )
+
+    assert client.messages.stream.call_count == 2
+    assert result.warnings == ["retried_invalid_response"]
+    # Usage must cover both API calls, not just the successful one.
+    assert result.usage.input_tokens == 2000
+    assert result.usage.output_tokens == 1000
+    assert result.usage.cache_creation_input_tokens == 400
+
+
+async def test_truncated_response_is_not_retried(settings):
+    message = fake_message(text='{"incomplete": tr', stop_reason="max_tokens")
+    client = _client_returning(message)
+
+    with pytest.raises(ClaudeTruncatedError):
+        await extract_sds(
+            content=b"data",
+            content_type="application/pdf",
+            client=client,
+            settings=settings,
+            request_id="req-6c",
+        )
+
+    # Retrying a max_tokens truncation would just truncate again.
+    assert client.messages.stream.call_count == 1
+
+
+async def test_refusal_on_retry_raises_refusal_error(settings):
+    client = MagicMock()
+    client.messages.stream.side_effect = [
+        FakeStreamContext(fake_message(text="not json at all", stop_reason="end_turn")),
+        FakeStreamContext(
+            fake_message(
+                text="",
+                stop_reason="refusal",
+                stop_details=SimpleNamespace(category="cyber"),
+            )
+        ),
+    ]
+
+    with pytest.raises(ClaudeRefusalError):
+        await extract_sds(
+            content=b"data",
+            content_type="application/pdf",
+            client=client,
+            settings=settings,
+            request_id="req-6d",
+        )
+
+
+# --- multi-SDS detection ------------------------------------------------------
+
+
+async def test_additional_documents_add_detection_warning(settings):
+    payload = minimal_sds_payload()
+    payload["additional_documents"] = [
+        {"product_name": "B剤", "start_page": 6, "end_page": 11}
+    ]
+    message = fake_message(text=json.dumps(payload), stop_reason="end_turn")
+    client = _client_returning(message)
+
+    result = await extract_sds(
+        content=b"data",
+        content_type="application/pdf",
+        client=client,
+        settings=settings,
+        request_id="req-6f",
+    )
+
+    assert result.warnings == ["additional_sds_documents_detected"]
+    assert result.data.additional_documents[0].start_page == 6
+
+
+# --- domain post-validation warnings ----------------------------------------
+
+
+async def test_domain_warnings_are_appended(settings):
+    payload = minimal_sds_payload()
+    payload["section_3_composition"]["ingredients"] = [
+        {"substance_name": "トルエン", "cas_number": "108-88-4"}  # bad check digit
+    ]
+    payload["section_2_hazards_identification"]["pictograms"] = ["GHS02", "GHS99"]
+    message = fake_message(text=json.dumps(payload), stop_reason="end_turn")
+    client = _client_returning(message)
+
+    result = await extract_sds(
+        content=b"data",
+        content_type="application/pdf",
+        client=client,
+        settings=settings,
+        request_id="req-6e",
+    )
+
+    assert result.warnings == [
+        "invalid_cas_number:108-88-4",
+        "unknown_pictogram:GHS99",
+    ]
 
 
 # --- structured-outputs grammar-size fallback -------------------------------

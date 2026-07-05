@@ -19,7 +19,9 @@ pytest tests/test_extraction_service.py::test_name   # run one test
 RUN_INTEGRATION=1 ANTHROPIC_API_KEY=sk-ant-... pytest -m integration
 
 # Real-world SDS sample verification (drop PDFs/images into tests/fixtures/real_world/ first;
-# results are written to tests/fixtures/real_world/_results/ — both are gitignored)
+# results are written to tests/fixtures/real_world/_results/ — both are gitignored).
+# Optional: put <name>.expected.json ground truth next to a sample to get a
+# field-level accuracy report in _results/<name>.accuracy.json.
 RUN_INTEGRATION=1 ANTHROPIC_API_KEY=sk-ant-... pytest -m integration tests/integration/test_real_world_extraction.py -s
 
 # Run the server
@@ -35,9 +37,10 @@ Request flow for `POST /v1/sds/extract`:
 
 1. `app/main.py` — middleware assigns a `request_id` (returned as `X-Request-ID`, threaded through all logs and error bodies) and a single `AppError` exception handler renders every error as `{"error": {"type", "message", "request_id"}}`.
 2. `app/dependencies.py` — `X-API-Key` shared-secret auth (constant-time compare), applied router-wide in `app/api/v1/router.py`.
-3. `app/validation/file_validation.py` — size/MIME/PDF-page-count checks (Content-Length pre-check before buffering, then re-check after read).
-4. `app/services/extraction_service.py` — sends the file to Claude (base64 document/image block) and validates the response with Pydantic. **Always streams** (`client.messages.stream`) so long extractions never trip the SDK's non-streaming timeout, and uses `AsyncAnthropic` so the event loop isn't blocked.
-5. `app/schemas/sds.py` — `SDSDocument`, the 16-section output model. `SDS_JSON_SCHEMA` is computed once at import time.
+3. `app/validation/file_validation.py` — size/MIME/PDF-page-count checks (Content-Length pre-check before buffering, then re-check after read). Also hosts `slice_pdf_pages` backing the optional `pages` form field ("6" / "6-11", 1-based inclusive) used to re-extract the further documents of a multi-SDS PDF.
+4. `app/services/extraction_service.py` — sends the file to Claude (base64 document/image block; no sampling params — they 400 on Opus 4.7+) and validates the response with Pydantic; a validation failure not caused by max_tokens truncation is retried once (`retried_invalid_response` warning, usage summed across both calls). **Always streams** (`client.messages.stream`) so long extractions never trip the SDK's non-streaming timeout, and uses `AsyncAnthropic` so the event loop isn't blocked.
+5. `app/services/postvalidation.py` — deterministic domain checks on the validated document (CAS check digit, GHS01–09 pictogram vocabulary, leading H/P-code format, UN-number format); violations become `warnings` entries, never rejections. Explicit-absence notations common in Japanese SDS (非該当, 非開示, 適用外, ...) are allowlisted — a CAS/UN field holding one is faithful transcription, not a misread. New warning kinds also go in the README warnings table.
+6. `app/schemas/sds.py` — `SDSDocument`, the 16-section output model. `SDS_JSON_SCHEMA` is computed once at import time.
 
 ### Output enforcement: two-tier with automatic fallback
 
@@ -54,6 +57,7 @@ This is the most nuanced part of the codebase — read the docstrings in `app/se
 - All models inherit `StrictModel` (`app/schemas/common.py`, `extra="forbid"`) — this emits `additionalProperties: false`, required by structured outputs and load-bearing on the fallback path to reject fabricated fields.
 - **All measured values are strings**, never numbers, so ranges/units/qualifiers survive verbatim ("10~20%", "約35℃(密閉式)").
 - Sections 1–3, 8, 9, 14, 15 have dedicated structured fields; the rest use the generic `SDSSection`. Every section keeps a faithful-text `content_markdown` / `raw_text` field — structured fields are a projection, not a replacement, because SDS content is safety-critical and must not be lossily condensed.
+- Multi-SDS files: extraction always targets the **first** SDS; the model reports the rest in `additional_documents` (product name + 1-based page range), which triggers the `additional_sds_documents_detected` warning. Callers re-fetch them via the `pages` form field — see the README integration flow.
 
 ### Error handling
 

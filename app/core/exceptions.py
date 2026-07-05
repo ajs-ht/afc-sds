@@ -40,6 +40,13 @@ class EmptyFileError(AppError):
     error_type = "empty_file"
 
 
+class InvalidPageRangeError(AppError):
+    """The `pages` form field is malformed, out of range, or not applicable."""
+
+    status_code = 400
+    error_type = "invalid_page_range"
+
+
 class UnauthorizedError(AppError):
     status_code = 401
     error_type = "unauthorized"

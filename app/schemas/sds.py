@@ -23,7 +23,21 @@ from typing import Literal, Optional
 
 from app.schemas.common import StrictModel
 
-SCHEMA_VERSION = "2.0"
+SCHEMA_VERSION = "2.1"
+
+
+class DetectedDocument(StrictModel):
+    """A further SDS the model noticed in the same file but did not extract.
+
+    Extraction always targets the first SDS in the file; each subsequent one
+    is reported here so callers can re-submit it via the `pages` form field.
+    Page numbers are 1-based, inclusive, and model-estimated (may be off by
+    a page on unusual layouts).
+    """
+
+    product_name: Optional[str] = None
+    start_page: Optional[int] = None
+    end_page: Optional[int] = None
 
 
 class ManufacturerContact(StrictModel):
@@ -185,6 +199,12 @@ class SDSDocument(StrictModel):
     section_14_transport: TransportInfo  # 輸送上の注意
     section_15_regulatory: RegulatoryInfo  # 適用法令
     section_16_other: SDSSection  # その他の情報
+
+    # SDS documents beyond the first found in the same file (multi-SDS PDFs).
+    # The first SDS is what the fields above describe; entries here let
+    # callers fetch the rest with a `pages`-scoped re-request. Non-empty
+    # triggers the `additional_sds_documents_detected` response warning.
+    additional_documents: list[DetectedDocument] = []
 
     # Model-reported gaps: illegible, missing, or ambiguous content. Never a
     # substitute for guessing — Claude is instructed to record gaps here

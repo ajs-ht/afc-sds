@@ -15,6 +15,7 @@ from app.core.exceptions import (
 from app.core.logging import log_usage
 from app.schemas.responses import ExtractionUsage, SDSExtractionResponse
 from app.schemas.sds import SDS_JSON_SCHEMA, SDSDocument
+from app.services.postvalidation import collect_domain_warnings
 from app.services.prompts import (
     SYSTEM_PROMPT_BASE,
     SYSTEM_PROMPT_WITH_SCHEMA,
@@ -28,6 +29,8 @@ _CODE_FENCE_RE = re.compile(r"^```(?:json)?\s*\n?|\n?```\s*$")
 PDF_MIME_TYPE = "application/pdf"
 
 STRUCTURED_OUTPUTS_UNAVAILABLE_WARNING = "structured_outputs_unavailable"
+RETRIED_INVALID_RESPONSE_WARNING = "retried_invalid_response"
+ADDITIONAL_SDS_DOCUMENTS_WARNING = "additional_sds_documents_detected"
 
 # Set to True the first time the API rejects our schema with a compiled-grammar
 # size error, so subsequent requests go straight to the prompt-embedded-schema
@@ -75,12 +78,70 @@ async def extract_sds(
     grammar exceeds the API's size limit, the request is retried with the
     schema embedded in the prompt instead, and the response is still
     validated with Pydantic either way.
-    """
 
-    global _grammar_too_large
+    A response that fails Pydantic validation (without having been truncated
+    by max_tokens) is retried once before surfacing extraction_invalid_response
+    — on the prompt-embedded-schema path nothing constrains decoding, so a
+    one-off malformed response is recoverable. The returned usage covers all
+    API calls made for the request.
+    """
 
     document_block = build_content_block(content, content_type)
     structured = settings.use_structured_outputs and not _grammar_too_large
+
+    message, structured = await _request_extraction(
+        client, settings, document_block, structured=structured, request_id=request_id
+    )
+    api_messages = [message]
+    parsed, retried = _parse_document(message)
+
+    if parsed is None:
+        logger.warning(
+            "response failed SDS schema validation; retrying once (request_id=%s)",
+            request_id,
+        )
+        message, structured = await _request_extraction(
+            client, settings, document_block, structured=structured, request_id=request_id
+        )
+        api_messages.append(message)
+        parsed, _ = _parse_document(message, final_attempt=True)
+
+    warnings: list[str] = []
+    if message.stop_reason == "max_tokens":
+        warnings.append("output_truncated_max_tokens")
+    if retried:
+        warnings.append(RETRIED_INVALID_RESPONSE_WARNING)
+    if settings.use_structured_outputs and not structured:
+        warnings.append(STRUCTURED_OUTPUTS_UNAVAILABLE_WARNING)
+    if parsed.additional_documents:
+        # Multi-SDS file: only the first SDS was extracted. Callers re-fetch
+        # the rest via the `pages` form field using the reported page ranges.
+        warnings.append(ADDITIONAL_SDS_DOCUMENTS_WARNING)
+    warnings.extend(collect_domain_warnings(parsed))
+
+    return SDSExtractionResponse(
+        data=parsed,
+        warnings=warnings,
+        model=message.model,
+        usage=_sum_usage(api_messages),
+    )
+
+
+async def _request_extraction(
+    client: anthropic.AsyncAnthropic,
+    settings: Settings,
+    document_block: dict,
+    *,
+    structured: bool,
+    request_id: str,
+):
+    """One Claude call: grammar-size fallback, SDK exception mapping, usage log.
+
+    Returns (message, structured) — `structured` flips to False when the call
+    fell back to the prompt-embedded schema mid-flight.
+    """
+
+    global _grammar_too_large
 
     try:
         try:
@@ -121,16 +182,14 @@ async def extract_sds(
         raise ClaudeUpstreamError(500, f"Unexpected Anthropic API error: {exc}") from exc
 
     usage = message.usage
-    cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
-    cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
     log_usage(
         request_id=request_id,
         model=message.model,
         stop_reason=message.stop_reason,
         input_tokens=usage.input_tokens,
         output_tokens=usage.output_tokens,
-        cache_creation_input_tokens=cache_creation,
-        cache_read_input_tokens=cache_read,
+        cache_creation_input_tokens=getattr(usage, "cache_creation_input_tokens", 0) or 0,
+        cache_read_input_tokens=getattr(usage, "cache_read_input_tokens", 0) or 0,
     )
 
     if message.stop_reason == "refusal":
@@ -140,34 +199,43 @@ async def extract_sds(
             category=getattr(details, "category", None) if details else None,
         )
 
-    text = _strip_code_fence(_extract_text_block(message))
+    return message, structured
 
+
+def _parse_document(message, *, final_attempt: bool = False) -> tuple[SDSDocument | None, bool]:
+    """Validate a message's text as an SDSDocument.
+
+    Returns (document, needs_retry_marker). A validation failure on a
+    non-truncated response returns (None, True) so the caller can retry once;
+    with final_attempt=True it raises instead. Truncation always raises —
+    retrying the same document would just truncate again.
+    """
+
+    text = _strip_code_fence(_extract_text_block(message))
     try:
-        parsed = SDSDocument.model_validate_json(text)
+        return SDSDocument.model_validate_json(text), False
     except (ValidationError, ValueError) as exc:
         if message.stop_reason == "max_tokens":
             raise ClaudeTruncatedError(
                 "Claude's response was truncated (max_tokens) before completing valid JSON."
             ) from exc
-        raise ClaudeResponseInvalidError(
-            f"Claude's response did not match the expected SDS schema: {exc}"
-        ) from exc
+        if final_attempt:
+            raise ClaudeResponseInvalidError(
+                "Claude's response did not match the expected SDS schema "
+                f"(even after one retry): {exc}"
+            ) from exc
+        return None, True
 
-    warnings: list[str] = []
-    if message.stop_reason == "max_tokens":
-        warnings.append("output_truncated_max_tokens")
-    if settings.use_structured_outputs and not structured:
-        warnings.append(STRUCTURED_OUTPUTS_UNAVAILABLE_WARNING)
 
-    return SDSExtractionResponse(
-        data=parsed,
-        warnings=warnings,
-        model=message.model,
-        usage=ExtractionUsage(
-            input_tokens=usage.input_tokens,
-            output_tokens=usage.output_tokens,
-            cache_creation_input_tokens=cache_creation,
-            cache_read_input_tokens=cache_read,
+def _sum_usage(messages) -> ExtractionUsage:
+    return ExtractionUsage(
+        input_tokens=sum(m.usage.input_tokens for m in messages),
+        output_tokens=sum(m.usage.output_tokens for m in messages),
+        cache_creation_input_tokens=sum(
+            getattr(m.usage, "cache_creation_input_tokens", 0) or 0 for m in messages
+        ),
+        cache_read_input_tokens=sum(
+            getattr(m.usage, "cache_read_input_tokens", 0) or 0 for m in messages
         ),
     )
 
@@ -179,6 +247,10 @@ async def _stream_message(
     *,
     structured: bool,
 ):
+    # Note: sampling params (temperature/top_p/top_k) are intentionally absent —
+    # they are removed on Opus 4.7+ models and the API rejects them with a 400
+    # ("`temperature` is deprecated for this model"). Extraction consistency is
+    # carried by the transcription-style prompt instead.
     kwargs: dict = {
         "model": settings.model_id,
         "max_tokens": settings.max_output_tokens,

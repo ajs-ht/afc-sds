@@ -1,8 +1,11 @@
+import base64
+import io
 import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from pypdf import PdfReader, PdfWriter
 
 from app.main import app
 from app.services.claude_client import get_claude_client
@@ -110,6 +113,58 @@ def test_extract_truncated_output_returns_502(client, auth_headers, sample_pdf_b
 
     assert response.status_code == 502
     assert response.json()["error"]["type"] == "extraction_truncated"
+
+
+def _pdf_with_pages(count: int) -> bytes:
+    writer = PdfWriter()
+    for _ in range(count):
+        writer.add_blank_page(width=595, height=842)
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    return buffer.getvalue()
+
+
+def test_extract_with_pages_sends_only_selected_pages(client, auth_headers):
+    payload = minimal_sds_payload()
+    message = fake_message(text=json.dumps(payload), stop_reason="end_turn")
+    fake_client = _override_client_with_message(message)
+
+    response = client.post(
+        "/v1/sds/extract",
+        headers=auth_headers,
+        files={"file": ("multi_sds.pdf", _pdf_with_pages(11), "application/pdf")},
+        data={"pages": "6-11"},
+    )
+
+    assert response.status_code == 200
+    _, kwargs = fake_client.messages.stream.call_args
+    document_block = kwargs["messages"][0]["content"][0]
+    sent_pdf = base64.b64decode(document_block["source"]["data"])
+    assert len(PdfReader(io.BytesIO(sent_pdf)).pages) == 6
+
+
+def test_extract_with_invalid_pages_returns_400(client, auth_headers):
+    response = client.post(
+        "/v1/sds/extract",
+        headers=auth_headers,
+        files={"file": ("multi_sds.pdf", _pdf_with_pages(3), "application/pdf")},
+        data={"pages": "2-9"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["type"] == "invalid_page_range"
+
+
+def test_extract_with_pages_on_image_returns_400(client, auth_headers):
+    response = client.post(
+        "/v1/sds/extract",
+        headers=auth_headers,
+        files={"file": ("scan.png", b"\x89PNG\r\n\x1a\n" + b"0" * 100, "image/png")},
+        data={"pages": "1"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["type"] == "invalid_page_range"
 
 
 def test_extract_max_tokens_with_valid_json_returns_warning(
