@@ -18,6 +18,14 @@ class Settings(BaseSettings):
 
     max_output_tokens: int = 24000
 
+    # Constrained decoding via Claude's structured outputs (output_config.format).
+    # Off by default: as of 2026-07 the SDS schema exceeds the API's
+    # compiled-grammar limits no matter how it is slimmed down (see the
+    # prompts.py docstring), so enabling this just costs one 400 round-trip
+    # per process before the automatic fallback kicks in. Flip it on to
+    # re-test after Anthropic raises the limit — the fallback makes that safe.
+    use_structured_outputs: bool = False
+
     log_level: str = "INFO"
     log_format: Literal["text", "json"] = "text"
 

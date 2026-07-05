@@ -28,6 +28,17 @@ requires_live_api = pytest.mark.skipif(
 )
 
 
+@pytest.fixture(autouse=True)
+def _reset_structured_outputs_state():
+    """The grammar-too-large fallback flag is process-local state; make sure
+    one test tripping it can't leak into another."""
+    from app.services import extraction_service
+
+    extraction_service._grammar_too_large = False
+    yield
+    extraction_service._grammar_too_large = False
+
+
 @pytest.fixture
 def client() -> TestClient:
     return TestClient(app)

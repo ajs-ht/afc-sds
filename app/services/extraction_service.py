@@ -1,4 +1,5 @@
 import base64
+import logging
 import re
 
 import anthropic
@@ -13,12 +14,32 @@ from app.core.exceptions import (
 )
 from app.core.logging import log_usage
 from app.schemas.responses import ExtractionUsage, SDSExtractionResponse
-from app.schemas.sds import SDSDocument
-from app.services.prompts import SYSTEM_PROMPT, USER_INSTRUCTION
+from app.schemas.sds import SDS_JSON_SCHEMA, SDSDocument
+from app.services.prompts import (
+    SYSTEM_PROMPT_BASE,
+    SYSTEM_PROMPT_WITH_SCHEMA,
+    USER_INSTRUCTION,
+)
+
+logger = logging.getLogger("afc_sds.extraction")
 
 _CODE_FENCE_RE = re.compile(r"^```(?:json)?\s*\n?|\n?```\s*$")
 
 PDF_MIME_TYPE = "application/pdf"
+
+STRUCTURED_OUTPUTS_UNAVAILABLE_WARNING = "structured_outputs_unavailable"
+
+# Set to True the first time the API rejects our schema with a compiled-grammar
+# size error, so subsequent requests go straight to the prompt-embedded-schema
+# fallback instead of paying a doomed 400 round-trip every time. Process-local;
+# resets on restart (intentional — the limit may have been raised, or the
+# schema shrunk, since the process last ran).
+_grammar_too_large = False
+
+
+def _is_grammar_size_error(exc: anthropic.BadRequestError) -> bool:
+    message = str(exc).lower()
+    return "grammar" in message and ("too large" in message or "too complex" in message)
 
 
 def build_content_block(content: bytes, content_type: str) -> dict:
@@ -48,29 +69,39 @@ async def extract_sds(
     calling client.messages.create directly, so large extractions never hit
     the SDK's non-streaming timeout guard regardless of document density.
     Uses the async client so a long extraction never blocks the event loop.
+
+    Output enforcement is two-tier: structured outputs (output_config.format)
+    constrain decoding at the API level when available; if the compiled
+    grammar exceeds the API's size limit, the request is retried with the
+    schema embedded in the prompt instead, and the response is still
+    validated with Pydantic either way.
     """
 
+    global _grammar_too_large
+
     document_block = build_content_block(content, content_type)
+    structured = settings.use_structured_outputs and not _grammar_too_large
 
     try:
-        async with client.messages.stream(
-            model=settings.model_id,
-            max_tokens=settings.max_output_tokens,
-            system=[
-                {
-                    "type": "text",
-                    "text": SYSTEM_PROMPT,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ],
-            messages=[
-                {
-                    "role": "user",
-                    "content": [document_block, {"type": "text", "text": USER_INSTRUCTION}],
-                }
-            ],
-        ) as stream:
-            message = await stream.get_final_message()
+        try:
+            message = await _stream_message(
+                client, settings, document_block, structured=structured
+            )
+        except anthropic.BadRequestError as exc:
+            if not (structured and _is_grammar_size_error(exc)):
+                raise
+            _grammar_too_large = True
+            structured = False
+            logger.warning(
+                "structured-outputs grammar exceeded the API size limit; "
+                "falling back to the prompt-embedded schema for this and "
+                "subsequent requests (request_id=%s): %s",
+                request_id,
+                exc,
+            )
+            message = await _stream_message(
+                client, settings, document_block, structured=False
+            )
     except anthropic.RateLimitError as exc:
         raise ClaudeUpstreamError(503, "Rate limited by the Anthropic API.") from exc
     except (anthropic.APIConnectionError, anthropic.APITimeoutError) as exc:
@@ -125,6 +156,8 @@ async def extract_sds(
     warnings: list[str] = []
     if message.stop_reason == "max_tokens":
         warnings.append("output_truncated_max_tokens")
+    if settings.use_structured_outputs and not structured:
+        warnings.append(STRUCTURED_OUTPUTS_UNAVAILABLE_WARNING)
 
     return SDSExtractionResponse(
         data=parsed,
@@ -139,6 +172,39 @@ async def extract_sds(
     )
 
 
+async def _stream_message(
+    client: anthropic.AsyncAnthropic,
+    settings: Settings,
+    document_block: dict,
+    *,
+    structured: bool,
+):
+    kwargs: dict = {
+        "model": settings.model_id,
+        "max_tokens": settings.max_output_tokens,
+        "system": [
+            {
+                "type": "text",
+                "text": SYSTEM_PROMPT_BASE if structured else SYSTEM_PROMPT_WITH_SCHEMA,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ],
+        "messages": [
+            {
+                "role": "user",
+                "content": [document_block, {"type": "text", "text": USER_INSTRUCTION}],
+            }
+        ],
+    }
+    if structured:
+        kwargs["output_config"] = {
+            "format": {"type": "json_schema", "schema": SDS_JSON_SCHEMA}
+        }
+
+    async with client.messages.stream(**kwargs) as stream:
+        return await stream.get_final_message()
+
+
 def _extract_text_block(message) -> str:
     for block in message.content:
         if block.type == "text":
@@ -149,9 +215,10 @@ def _extract_text_block(message) -> str:
 def _strip_code_fence(text: str) -> str:
     """Strip a wrapping ```json ... ``` fence, if Claude added one.
 
-    Without structured-outputs constrained decoding (see prompts.py), Claude
-    occasionally wraps its JSON in a markdown code fence despite being told
-    not to; this undoes that so model_validate_json sees raw JSON.
+    On the prompt-embedded-schema fallback path (no constrained decoding),
+    Claude occasionally wraps its JSON in a markdown code fence despite being
+    told not to; this undoes that so model_validate_json sees raw JSON. On
+    the structured-outputs path the fence can't occur, and this is a no-op.
     """
     text = text.strip()
     if text.startswith("```"):

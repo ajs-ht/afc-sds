@@ -31,8 +31,18 @@ def test_live_extraction_returns_structured_sds(client, auth_headers):
     assert response.status_code == 200, response.text
     body = response.json()
 
-    assert body["data"]["schema_version"] == "1.0"
+    assert body["data"]["schema_version"] == "2.0"
     assert "section_1_product_and_company" in body["data"]
+
+    # Trivially true while USE_STRUCTURED_OUTPUTS is off (the default). Its
+    # real job is the opt-in retest after Anthropic raises the grammar
+    # limits: run this with USE_STRUCTURED_OUTPUTS=true — if the schema now
+    # compiles there's no warning and this passes; if it still falls back,
+    # this fails loudly instead of papering over the silent downgrade.
+    assert "structured_outputs_unavailable" not in body["warnings"], (
+        "structured outputs grammar was rejected as too large; "
+        "keep USE_STRUCTURED_OUTPUTS=false until the API limit is raised"
+    )
 
     usage = body["usage"]
     print(

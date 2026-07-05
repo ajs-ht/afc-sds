@@ -18,6 +18,11 @@ class SDSExtractionResponse(StrictModel):
     usage: ExtractionUsage
 
 
+class SDSSchemaResponse(StrictModel):
+    schema_version: str
+    json_schema: dict
+
+
 class ErrorDetail(StrictModel):
     type: str
     message: str

@@ -1,22 +1,36 @@
 """Prompt text for SDS extraction.
 
-SYSTEM_PROMPT is identical on every request, so it is sent with
-`cache_control: {"type": "ephemeral"}` (see extraction_service.py) to make
-repeat calls cheaper and faster.
+Two system-prompt variants exist for the two output-enforcement modes
+(see extraction_service.py):
 
-The output JSON shape is enforced by embedding the schema in the prompt and
-validating the response with Pydantic afterwards, rather than via Claude's
-structured-outputs `output_config` — the full SDSDocument schema (13 reused
-SDSSection refs plus the sections 1-3 nested models) exceeds the API's
-compiled-grammar size limit ("The compiled grammar is too large... reduce
-the number of strict tools"), so constrained decoding cannot be used here.
+- SYSTEM_PROMPT_BASE — extraction rules only. Used when Claude's structured
+  outputs (`output_config.format`) enforce the JSON shape at the API level,
+  so embedding the schema in the prompt would only waste tokens.
+- SYSTEM_PROMPT_WITH_SCHEMA — BASE plus the JSON schema embedded as text.
+  Used when structured outputs are disabled via settings (the default) or as
+  the automatic fallback when the compiled structured-outputs grammar exceeds
+  the API's size limit; the response is then validated with Pydantic after
+  the fact.
+
+Why structured outputs are off by default (probed against the live API,
+2026-07): the grammar compiler rejects even a flat object with 20 *optional*
+string fields ("Schema is too complex"), while required-only flat objects
+pass at 60+ fields. The SDS schema is dominated by optional fields, nested
+objects, and arrays, and every slimming variant tried (stripping
+title/default/description, collapsing anyOf-null, making all fields
+required) still got "The compiled grammar is too large". Until the limit is
+raised, constrained decoding cannot host this schema — the prompt-embedded
+fallback is the operating mode.
+
+Each variant is byte-stable across requests, so both are sent with
+`cache_control: {"type": "ephemeral"}` and cache independently.
 """
 
 import json
 
 from app.schemas.sds import SDS_JSON_SCHEMA
 
-SYSTEM_PROMPT = """\
+SYSTEM_PROMPT_BASE = """\
 あなたは化学物質の安全データシート(SDS)をJIS Z 7253の標準16項目構成に沿って
 構造化JSONへ変換する、高精度なAI-OCR/抽出エンジンです。
 
@@ -52,14 +66,20 @@ SYSTEM_PROMPT = """\
   しないでください。
 - 成分の濃度 (concentration) は "10~20%" のような範囲表記をそのまま文字列として
   保持し、数値への変換や丸めを行わないでください。
-- 4〜16項目の内容は、原文の情報を欠落させることなく、読みやすいMarkdown形式の
-  テキストとして "content_markdown" に整理してください(表はMarkdown表記で構いま
-  せん)。
-- 出力は以下のJSON Schemaに厳密に従ってください。スキーマにないフィールド
-  を追加しないでください。
-- 出力は有効なJSONオブジェクトのみとしてください。前置き・説明文・```のような
-  コードブロック記法を一切含めないでください。
+- 第8・9・14・15項には構造化フィールドがあります。ばく露限界値(管理濃度・許容
+  濃度など区分名は原文のまま)、物性値(融点・引火点・蒸気圧など)、国連番号・
+  容器等級、適用法令名と該当区分を、範囲・単位・付帯条件を含む原文表記のまま
+  文字列として該当フィールドへ転記してください。記載のないフィールドは null の
+  ままにしてください。
+- 構造化フィールドの有無にかかわらず、各項目の "content_markdown" には原文の
+  情報を欠落させることなく、読みやすいMarkdown形式のテキストとして整理して
+  ください(表はMarkdown表記で構いません)。
+- 出力はスキーマに厳密に従った有効なJSONオブジェクトのみとしてください。
+  スキーマにないフィールドを追加せず、前置き・説明文・```のようなコードブロック
+  記法を一切含めないでください。
+"""
 
+SYSTEM_PROMPT_WITH_SCHEMA = SYSTEM_PROMPT_BASE + """
 # 出力JSON Schema
 {schema_json}
 """.format(schema_json=json.dumps(SDS_JSON_SCHEMA, ensure_ascii=False))
