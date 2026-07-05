@@ -84,6 +84,7 @@ def test_unknown_pictogram_warns():
         "H225 引火性の高い液体及び蒸気",
         "H360FD 生殖能又は胎児への悪影響のおそれ",
         "P301+P310 飲み込んだ場合:直ちに医師に連絡すること。",
+        "H225引火性の高い液体及び蒸気",  # valid code, no separating space
         "引火性の高い液体及び蒸気",  # no leading code — never judged
         "",
     ],
@@ -99,6 +100,7 @@ def test_wellformed_or_codeless_statements_pass(statement):
         ("H22 引火性の高い液体", "H22"),
         ("H2250 引火性の高い液体", "H2250"),
         ("P30+P310 飲み込んだ場合", "P30+P310"),
+        ("H22引火性の高い液体", "H22"),  # malformed code, no separating space
     ],
 )
 def test_malformed_leading_codes_warn(statement, token):

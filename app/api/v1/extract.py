@@ -21,13 +21,17 @@ ERROR_RESPONSES = {
         "model": ErrorResponse,
         "description": (
             "Invalid upload: unsupported_file_type / file_too_large / "
-            "too_many_pages / empty_file / invalid_page_range"
+            "too_many_pages / empty_file / invalid_page_range, or Claude "
+            "rejected the document itself (invalid_document)"
         ),
     },
     401: {"model": ErrorResponse, "description": "Invalid or missing X-API-Key (unauthorized)"},
     422: {
         "model": ErrorResponse,
-        "description": "Claude declined to process the document (extraction_refused)",
+        "description": (
+            "Claude declined to process the document (extraction_refused), "
+            "or the request failed validation (validation_error)"
+        ),
     },
     500: {
         "model": ErrorResponse,
@@ -67,10 +71,10 @@ async def extract_sds_endpoint(
 
     content = await file.read()
 
+    validate_upload(content=content, content_type=file.content_type, settings=settings)
+
     if pages is not None:
         content = slice_pdf_pages(content, file.content_type, pages)
-
-    validate_upload(content=content, content_type=file.content_type, settings=settings)
 
     return await extract_sds(
         content=content,

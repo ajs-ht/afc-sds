@@ -25,7 +25,12 @@ _PICTOGRAM_VOCAB = frozenset(f"GHS{n:02d}" for n in range(1, 10))
 # would otherwise go (非該当, 非開示, 分類基準に該当しない, ...). The model
 # transcribes them verbatim per the prompt, so a CAS/UN field holding one is
 # faithful transcription, not a misread — don't warn on it. Matched as a
-# substring of the whitespace-stripped value so composed phrases hit too.
+# substring of the whitespace-stripped value so composed phrases hit too
+# (e.g. "データなし", "記載なし" — see tests/test_postvalidation.py). This is
+# deliberate even for the short/generic markers ("なし", "不明"): a garbled
+# OCR string coincidentally containing one as noise would suppress a
+# legitimate warning, but tightening to exact-match would break the composed
+# phrases above, which real SDS documents use.
 _EXPLICIT_ABSENCE_MARKERS = (
     "非該当",
     "該当しない",
@@ -49,9 +54,14 @@ _CAS_RE = re.compile(r"(\d{2,7})-(\d{2})-(\d)")
 # 国連番号: 4 digits, optionally prefixed with "UN" ("1230" / "UN1230" / "UN 1230").
 _UN_NUMBER_RE = re.compile(r"(?:UN\s?)?\d{4}", re.IGNORECASE)
 
-# A leading token that *looks like* a GHS H/P code (so we know the model
-# meant to transcribe one).
-_CODE_LIKE_RE = re.compile(r"[HP]\d", re.IGNORECASE)
+# A leading run of characters that *looks like* a GHS H/P code (so we know
+# the model meant to transcribe one). Anchored at the start of the
+# (whitespace-stripped) statement rather than split on whitespace, since SDS
+# text commonly has no separator between the code and the following Japanese
+# phrase (e.g. "H225引火性の高い液体..."); the character class stops the
+# match at the first character — space or Japanese text alike — that can't
+# be part of a code.
+_CODE_LIKE_RE = re.compile(r"[HP]\d[0-9A-Za-z+]*")
 
 # Valid H codes are H + 3 digits with an optional GHS letter suffix
 # (H360FD, H361d, ...); valid P codes are P + 3 digits. Either may be a
@@ -125,9 +135,10 @@ def _malformed_leading_code(statement: str) -> str | None:
     stripped = statement.strip()
     if not stripped:
         return None
-    token = stripped.split()[0].rstrip(":：,、.。")
-    if not _CODE_LIKE_RE.match(token):
+    match = _CODE_LIKE_RE.match(stripped)
+    if match is None:
         return None
+    token = match.group(0)
     if _VALID_CODE_SEQ_RE.fullmatch(token):
         return None
     return token
