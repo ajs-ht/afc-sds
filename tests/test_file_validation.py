@@ -51,6 +51,35 @@ def test_missing_content_type_rejected(sample_pdf_bytes, settings):
         validate_upload(content=sample_pdf_bytes, content_type=None, settings=settings)
 
 
+def test_spoofed_pdf_content_type_rejected(settings):
+    with pytest.raises(UnsupportedFileTypeError):
+        validate_upload(
+            content=b"this is not a pdf", content_type="application/pdf", settings=settings
+        )
+
+
+def test_spoofed_png_content_type_rejected(settings):
+    with pytest.raises(UnsupportedFileTypeError):
+        validate_upload(content=b"not a png either", content_type="image/png", settings=settings)
+
+
+def test_valid_webp_passes(settings):
+    validate_upload(
+        content=b"RIFF" + b"\x00\x00\x00\x00" + b"WEBP" + b"0" * 100,
+        content_type="image/webp",
+        settings=settings,
+    )
+
+
+def test_riff_without_webp_fourcc_rejected(settings):
+    with pytest.raises(UnsupportedFileTypeError):
+        validate_upload(
+            content=b"RIFF" + b"\x00\x00\x00\x00" + b"AVI " + b"0" * 100,
+            content_type="image/webp",
+            settings=settings,
+        )
+
+
 def test_oversized_file_rejected(settings):
     oversized = b"%PDF-1.4\n" + b"0" * (settings.max_upload_bytes + 1)
     with pytest.raises(FileTooLargeError):

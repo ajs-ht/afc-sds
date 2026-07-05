@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from app.config import Settings
 from app.core.exceptions import (
+    ClaudeInvalidDocumentError,
     ClaudeRefusalError,
     ClaudeResponseInvalidError,
     ClaudeTruncatedError,
@@ -150,7 +151,11 @@ async def _request_extraction(
             )
         except anthropic.BadRequestError as exc:
             if not (structured and _is_grammar_size_error(exc)):
-                raise
+                # Not a grammar-size fallback case: the document/request itself
+                # was rejected, which is the caller's fault, not a server error.
+                raise ClaudeInvalidDocumentError(
+                    f"Anthropic rejected the document as invalid: {exc}"
+                ) from exc
             _grammar_too_large = True
             structured = False
             logger.warning(

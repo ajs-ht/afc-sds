@@ -81,3 +81,10 @@ class ClaudeResponseInvalidError(AppError):
 
     status_code = 502
     error_type = "extraction_invalid_response"
+
+
+class ClaudeInvalidDocumentError(AppError):
+    """Anthropic rejected the document itself as unprocessable (caller's fault, not ours)."""
+
+    status_code = 400
+    error_type = "invalid_document"

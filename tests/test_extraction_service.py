@@ -8,6 +8,7 @@ import pytest
 
 from app.config import Settings
 from app.core.exceptions import (
+    ClaudeInvalidDocumentError,
     ClaudeRefusalError,
     ClaudeResponseInvalidError,
     ClaudeTruncatedError,
@@ -412,7 +413,7 @@ async def test_non_grammar_bad_request_does_not_fall_back(so_settings):
         anthropic.BadRequestError("bad request", response=_fake_response(400), body=None)
     )
 
-    with pytest.raises(ClaudeUpstreamError):
+    with pytest.raises(ClaudeInvalidDocumentError):
         await extract_sds(
             content=b"data",
             content_type="application/pdf",
@@ -442,10 +443,6 @@ async def test_non_grammar_bad_request_does_not_fall_back(so_settings):
             500,
         ),
         (anthropic.NotFoundError("bad model", response=_fake_response(404), body=None), 500),
-        (
-            anthropic.BadRequestError("bad request", response=_fake_response(400), body=None),
-            500,
-        ),
     ],
 )
 async def test_anthropic_status_errors_map_to_upstream_error(settings, exc, expected_status):
@@ -460,6 +457,22 @@ async def test_anthropic_status_errors_map_to_upstream_error(settings, exc, expe
             request_id="req-7",
         )
     assert excinfo.value.status_code == expected_status
+
+
+async def test_bad_request_maps_to_invalid_document_error(settings):
+    client = _client_raising(
+        anthropic.BadRequestError("bad request", response=_fake_response(400), body=None)
+    )
+
+    with pytest.raises(ClaudeInvalidDocumentError) as excinfo:
+        await extract_sds(
+            content=b"data",
+            content_type="application/pdf",
+            client=client,
+            settings=settings,
+            request_id="req-7b",
+        )
+    assert excinfo.value.status_code == 400
 
 
 async def test_anthropic_connection_error_maps_to_503(settings):

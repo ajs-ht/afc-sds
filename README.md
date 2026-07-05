@@ -173,13 +173,18 @@ RUN_INTEGRATION=1 ANTHROPIC_API_KEY=sk-ant-... \
 | type | HTTP | 説明 |
 |---|---|---|
 | `unauthorized` | 401 | `X-API-Key` 不正/欠落 |
-| `unsupported_file_type` | 400 | 非対応のファイル形式 |
+| `unsupported_file_type` | 400 | 非対応のファイル形式(申告されたContent-Typeと実バイト列の不一致を含む) |
 | `file_too_large` | 400 | アップロードサイズ超過 |
 | `too_many_pages` | 400 | PDFページ数超過 |
+| `empty_file` | 400 | アップロードファイルが空 |
 | `invalid_page_range` | 400 | `pages` の形式不正・範囲外・PDF以外への指定 |
+| `invalid_document` | 400 | Anthropic APIがドキュメント内容自体を処理不能と判断 |
+| `validation_error` | 422 | リクエストの検証エラー(例: `file` 未指定) |
 | `extraction_refused` | 422 | Claudeが安全上の理由で処理を拒否 |
 | `extraction_truncated` | 502 | 出力がmax_tokensで途中終了しJSON検証に失敗 |
+| `extraction_invalid_response` | 502 | Claudeの出力がSDSスキーマに適合しない(再試行後も) |
 | `upstream_error` | 500/503 | Anthropic API側のエラー |
+| `internal_error` | 500 | 想定外のサーバーエラー |
 
 ### `GET /v1/sds/schema`
 

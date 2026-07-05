@@ -18,6 +18,27 @@ PDF_MIME_TYPE = "application/pdf"
 # `pages` form field: "6" (one page) or "6-11" (inclusive range), 1-based.
 _PAGES_SPEC_RE = re.compile(r"^\s*(\d+)\s*(?:-\s*(\d+)\s*)?$")
 
+# Magic-byte signatures for the MIME types this API accepts, so a spoofed
+# Content-Type header can't smuggle unexpected content past validate_upload().
+# WEBP is a RIFF container: the fourCC at byte offset 8 identifies it.
+_MAGIC_SIGNATURES: dict[str, tuple[bytes, ...]] = {
+    "application/pdf": (b"%PDF-",),
+    "image/png": (b"\x89PNG\r\n\x1a\n",),
+    "image/jpeg": (b"\xff\xd8\xff",),
+    "image/webp": (b"RIFF",),
+}
+
+
+def _has_valid_signature(content: bytes, content_type: str) -> bool:
+    signatures = _MAGIC_SIGNATURES.get(content_type)
+    if signatures is None:
+        return True
+    if not any(content.startswith(sig) for sig in signatures):
+        return False
+    if content_type == "image/webp":
+        return content[8:12] == b"WEBP"
+    return True
+
 
 def check_content_length(content_length_header: str | None, *, settings: Settings) -> None:
     """Reject an oversized request before its body is read into memory/disk.
@@ -60,6 +81,12 @@ def validate_upload(
         raise UnsupportedFileTypeError(
             f"Unsupported file type: {content_type!r}. "
             f"Allowed types: {sorted(settings.allowed_mime_types)}.",
+            content_type=content_type,
+        )
+
+    if not _has_valid_signature(content, content_type):
+        raise UnsupportedFileTypeError(
+            f"File content does not match the declared type {content_type!r}.",
             content_type=content_type,
         )
 
