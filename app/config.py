@@ -5,6 +5,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    """App configuration, loaded from environment variables / `.env`.
+
+    `.env.example` is the source of truth for which variables are settable
+    and what each one does. `allowed_mime_types` has no env-var counterpart
+    (config-only) and can only be changed by editing the default here.
+    """
+
     anthropic_api_key: str
     model_id: str = "claude-opus-4-8"
 

@@ -66,6 +66,16 @@ async def extract_sds_endpoint(
     settings: Settings = Depends(get_settings),
     client: anthropic.AsyncAnthropic = Depends(get_claude_client),
 ) -> SDSExtractionResponse:
+    """Extract structured JSON from an uploaded SDS (PDF or image).
+
+    Returns the JIS Z 7253 16-section document as `data`, plus `warnings`
+    (schema-valid but suspicious values; never a rejection) and `usage`
+    (token counts). For a PDF containing multiple concatenated SDS files,
+    only the first is extracted; the rest are reported in
+    `data.additional_documents` and callers re-fetch them by re-posting the
+    same file with `pages=<start_page>-<end_page>`.
+    """
+
     # Reject an oversized request before buffering its body, when possible.
     check_content_length(request.headers.get("content-length"), settings=settings)
 

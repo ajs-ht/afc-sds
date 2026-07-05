@@ -1,3 +1,11 @@
+"""Upload validation: size/MIME/PDF-page-count checks, and the `pages` slicer.
+
+`check_content_length` runs before the request body is buffered;
+`validate_upload` re-checks after it has been read (a spoofed Content-Length
+can't skip validation). `slice_pdf_pages` backs the optional `pages` form
+field used to re-extract further documents from a multi-SDS PDF.
+"""
+
 import io
 import re
 
