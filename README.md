@@ -44,8 +44,9 @@ Web UIやCLIは提供せず、他システムから呼び出されるHTTP API専
 どちらの経路でもレスポンスはPydanticで検証されてから返却されます。
 Pydantic検証に失敗した場合(かつmax_tokens打ち切りでない場合)は自動で1回だけ再抽出
 してから確定させます(再試行時は `warnings` に `retried_invalid_response` を付与、
-`usage` は全呼び出しの合算)。抽出は書き起こしタスクのため `temperature=0`(環境変数
-`TEMPERATURE` で変更可)で決定的に実行されます。
+`usage` は全呼び出しの合算)。
+なお `temperature` 等のサンプリングパラメータは現行モデル(Opus 4.7以降)ではAPIから
+削除されており指定できないため、抽出の一貫性はプロンプト(逐語転記の指示)で担保しています。
 
 ### ドメイン後処理検証 (warnings)
 

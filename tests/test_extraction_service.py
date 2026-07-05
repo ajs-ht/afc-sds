@@ -88,8 +88,8 @@ async def test_extract_sds_success_builds_expected_request(settings):
     _, kwargs = client.messages.stream.call_args
     assert kwargs["model"] == settings.model_id
     assert kwargs["max_tokens"] == settings.max_output_tokens
-    # Extraction is a transcription task: temperature 0 keeps it deterministic.
-    assert kwargs["temperature"] == 0.0
+    # Sampling params are removed on Opus 4.7+ — sending temperature is a 400.
+    assert "temperature" not in kwargs
     assert kwargs["system"][0]["cache_control"] == {"type": "ephemeral"}
     # Default mode: structured outputs are off (the SDS schema exceeds the
     # API's compiled-grammar limits — see prompts.py), so the schema is

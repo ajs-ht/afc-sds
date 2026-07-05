@@ -242,10 +242,13 @@ async def _stream_message(
     *,
     structured: bool,
 ):
+    # Note: sampling params (temperature/top_p/top_k) are intentionally absent —
+    # they are removed on Opus 4.7+ models and the API rejects them with a 400
+    # ("`temperature` is deprecated for this model"). Extraction consistency is
+    # carried by the transcription-style prompt instead.
     kwargs: dict = {
         "model": settings.model_id,
         "max_tokens": settings.max_output_tokens,
-        "temperature": settings.temperature,
         "system": [
             {
                 "type": "text",

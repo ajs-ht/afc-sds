@@ -18,10 +18,6 @@ class Settings(BaseSettings):
 
     max_output_tokens: int = 24000
 
-    # Sampling temperature for extraction. 0.0 keeps the transcription-style
-    # output deterministic and reproducible; raise only for experimentation.
-    temperature: float = 0.0
-
     # Constrained decoding via Claude's structured outputs (output_config.format).
     # Off by default: as of 2026-07 the SDS schema exceeds the API's
     # compiled-grammar limits no matter how it is slimmed down (see the
