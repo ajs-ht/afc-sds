@@ -8,7 +8,7 @@ Web UIやCLIは提供せず、他システムから呼び出されるHTTP API専
 ## 構成
 
 - FastAPI (Python 3.12)
-- Anthropic Claude API (`claude-opus-4-8`) — PDF/画像のネイティブ入力 + Structured Outputs (`output_config.format`)
+- Anthropic Claude API（既定 `claude-opus-4-8`、`MODEL_ID` で変更可） — PDF/画像のネイティブ入力 + Structured Outputs (`output_config.format`)
 - 認証: `X-API-Key` ヘッダによる簡易認証
 
 ### アーキテクチャ概要
@@ -56,9 +56,10 @@ Web UIやCLIは提供せず、他システムから呼び出されるHTTP API専
    返却します。
 2. **Structured Outputs** (`output_config.format`) — `USE_STRUCTURED_OUTPUTS=true` でオプトイン。
    APIレベルの制約付きデコードになりますが、**現行のClaude APIではSDSスキーマが
-   コンパイル済みグラマーの複雑度上限を超えるため利用できません**（2026-07に実APIで検証。
-   Optionalフィールド20個のフラットなスキーマですら拒否されるため、Optional中心のSDS
-   スキーマは載りません。詳細は `app/services/prompts.py` のdocstring参照）。
+   コンパイル済みグラマーの複雑度上限を超えるため利用できません**（2026-07に `claude-opus-4-8`
+   で実API検証。Optionalフィールド20個のフラットなスキーマですら拒否されるため、Optional中心の
+   SDSスキーマは載りません。詳細は `app/services/prompts.py` のdocstring参照）。この上限は
+   `MODEL_ID` を他モデルに変更した場合は未検証のため、切り替え時は再テストを推奨します。
    有効化した場合もグラマー超過を検知すると方式1へ自動フォールバックし、`warnings` に
    `structured_outputs_unavailable` を付けて通知するため、API側の上限緩和後に安全に
    再テストできます。
@@ -69,6 +70,8 @@ Pydantic検証に失敗した場合(かつmax_tokens打ち切りでない場合)
 `usage` は全呼び出しの合算)。
 なお `temperature` 等のサンプリングパラメータは現行モデル(Opus 4.7以降)ではAPIから
 削除されており指定できないため、抽出の一貫性はプロンプト(逐語転記の指示)で担保しています。
+この前提はOpus系列で確認したものであり、`MODEL_ID` を他モデルに切り替える場合は
+サンプリングパラメータの扱いが異なる可能性があるため要再確認です。
 
 ### ドメイン後処理検証 (warnings)
 
@@ -100,12 +103,29 @@ cp .env.example .env
 # .env を編集して ANTHROPIC_API_KEY / API_KEY を設定
 ```
 
+### モデルの選択
+
+`MODEL_ID` はデプロイ単位の設定で、値を変えるだけでコード変更なしに使用モデルを
+切り替えられます（`app/services/extraction_service.py` のリクエスト構築処理にモデル名
+依存の分岐はありません）。
+
+- `claude-opus-4-8`（既定） — 精度優先。コストは高め。
+- `claude-sonnet-5` — コストパフォーマンス重視の代替。画像/PDFのネイティブ入力に対応する
+  現行Claudeモデルであれば同様に利用可能です。
+
+ただし次の2点はOpus系列で確認した前提であり、他モデルに切り替える場合は再確認を推奨します
+（上記「出力の強制方法」参照）:
+
+- サンプリングパラメータ(`temperature`等)を送らない実装になっている点
+- Structured Outputsのグラマーサイズ上限によりSDSスキーマが載らないと判断している点
+  （`USE_STRUCTURED_OUTPUTS=true` で再テスト可能。自動フォールバックがあるため安全に試せます）
+
 主な環境変数（既定値は `.env.example` 参照）:
 
 | 変数 | 既定値 | 説明 |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | (必須) | Claude呼び出しに使うAnthropic APIキー |
-| `MODEL_ID` | `claude-opus-4-8` | 抽出に使うClaudeモデル |
+| `MODEL_ID` | `claude-opus-4-8` | 抽出に使うClaudeモデル。コスト重視なら `claude-sonnet-5` 等も指定可（上記「モデルの選択」参照） |
 | `API_KEY` | (必須) | クライアントが `X-API-Key` ヘッダで送る共有シークレット |
 | `MAX_UPLOAD_MB` | `32` | アップロードファイルサイズ上限(MB) |
 | `MAX_PDF_PAGES` | `50` | PDFの許容ページ数上限 |

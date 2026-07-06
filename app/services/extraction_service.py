@@ -270,7 +270,9 @@ async def _stream_message(
     # Note: sampling params (temperature/top_p/top_k) are intentionally absent —
     # they are removed on Opus 4.7+ models and the API rejects them with a 400
     # ("`temperature` is deprecated for this model"). Extraction consistency is
-    # carried by the transcription-style prompt instead.
+    # carried by the transcription-style prompt instead. This assumption was
+    # only verified against Opus; re-check it if settings.model_id (MODEL_ID)
+    # points at a different model family (e.g. claude-sonnet-5).
     kwargs: dict = {
         "model": settings.model_id,
         "max_tokens": settings.max_output_tokens,
