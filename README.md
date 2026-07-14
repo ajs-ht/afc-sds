@@ -179,10 +179,28 @@ curl http://localhost:8000/healthz
 ```bash
 pip install -e ".[dev]"
 pytest                              # ユニットテスト（実APIキー不要。デフォルトのpytest実行対象）
+pytest --cov=app --cov-branch --cov-fail-under=98   # カバレッジゲート付き（CIと同じ実行内容）
 RUN_INTEGRATION=1 pytest -m integration   # 統合テスト（実ANTHROPIC_API_KEYが必要。実APIを呼ぶため既定では除外）
 ```
 
 リンタ・フォーマッタは導入していません。
+
+### CI
+
+GitHub Actions（`.github/workflows/ci.yml`）が push / PR ごとにユニットテストを
+実行し、カバレッジが 98% を下回ると失敗します。統合テストは pyproject の
+`addopts` により自動除外されるため、CI に API キーは不要です。
+
+### スキーマ変更時の手順
+
+`SDSDocument`（出力スキーマ）はバージョン付きの公開契約です。出力の形を変える
+変更は `tests/test_schema.py::test_schema_change_requires_version_bump` が検知して
+失敗します。その場合は次の3点をセットで行ってください:
+
+1. `app/schemas/sds.py` の `SCHEMA_VERSION` をバンプ
+2. README の該当箇所（[出力スキーマ](#出力スキーマ-schema_version-21) など）を更新
+3. スナップショットを再生成:
+   `python -c "import json, pathlib; from app.schemas.sds import SDS_JSON_SCHEMA, SCHEMA_VERSION; pathlib.Path('tests/fixtures/schema_snapshot.json').write_text(json.dumps({'schema_version': SCHEMA_VERSION, 'schema': SDS_JSON_SCHEMA}, ensure_ascii=False, indent=2, sort_keys=True) + '\n', encoding='utf-8')"`
 
 ### 実世界のSDSサンプルによる検証
 

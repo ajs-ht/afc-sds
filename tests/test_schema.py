@@ -1,10 +1,22 @@
 import json
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.sds import SDS_JSON_SCHEMA, SDSDocument, SDSSection
+from app.schemas.sds import SCHEMA_VERSION, SDS_JSON_SCHEMA, SDSDocument, SDSSection
 from tests.factories import minimal_sds_payload
+
+SCHEMA_SNAPSHOT_PATH = Path(__file__).parent / "fixtures" / "schema_snapshot.json"
+
+# Regenerates tests/fixtures/schema_snapshot.json from the current schema.
+REGENERATE_SNAPSHOT_CMD = (
+    "python -c \"import json, pathlib; "
+    "from app.schemas.sds import SDS_JSON_SCHEMA, SCHEMA_VERSION; "
+    "pathlib.Path('tests/fixtures/schema_snapshot.json').write_text("
+    "json.dumps({'schema_version': SCHEMA_VERSION, 'schema': SDS_JSON_SCHEMA}, "
+    "ensure_ascii=False, indent=2, sort_keys=True) + '\\n', encoding='utf-8')\""
+)
 
 
 def test_sds_document_instantiates_with_minimal_data():
@@ -140,6 +152,32 @@ def test_sds_section_forbids_extra_fields():
                 "content_markdown": "",
                 "extra": "nope",
             }
+        )
+
+
+def test_schema_change_requires_version_bump():
+    """SDSDocument is a versioned contract (served at GET /v1/sds/schema;
+    downstream systems generate types from it). Any change to the output
+    shape must bump SCHEMA_VERSION in app/schemas/sds.py, update the README,
+    and regenerate the committed snapshot with:
+
+        %s
+    """ % REGENERATE_SNAPSHOT_CMD
+
+    snapshot = json.loads(SCHEMA_SNAPSHOT_PATH.read_text(encoding="utf-8"))
+
+    if snapshot["schema"] != SDS_JSON_SCHEMA and snapshot["schema_version"] == SCHEMA_VERSION:
+        pytest.fail(
+            "SDS_JSON_SCHEMA changed but SCHEMA_VERSION did not. The schema is "
+            "a versioned contract: bump SCHEMA_VERSION in app/schemas/sds.py, "
+            "update the README, then regenerate the snapshot:\n"
+            f"  {REGENERATE_SNAPSHOT_CMD}"
+        )
+    if snapshot["schema"] != SDS_JSON_SCHEMA or snapshot["schema_version"] != SCHEMA_VERSION:
+        pytest.fail(
+            "tests/fixtures/schema_snapshot.json is out of date with the "
+            "current schema/version. Regenerate it:\n"
+            f"  {REGENERATE_SNAPSHOT_CMD}"
         )
 
 

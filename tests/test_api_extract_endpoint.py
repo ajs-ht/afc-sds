@@ -68,6 +68,17 @@ def test_extract_unsupported_file_type_returns_400(client, auth_headers):
     assert response.json()["error"]["type"] == "unsupported_file_type"
 
 
+def test_extract_corrupt_pdf_returns_400(client, auth_headers):
+    # Valid %PDF- magic but unparsable structure (truncated download etc.).
+    response = client.post(
+        "/v1/sds/extract",
+        headers=auth_headers,
+        files={"file": ("broken.pdf", b"%PDF-1.7\nnot a real pdf body", "application/pdf")},
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["type"] == "unsupported_file_type"
+
+
 def test_extract_empty_file_returns_400(client, auth_headers):
     response = client.post(
         "/v1/sds/extract",

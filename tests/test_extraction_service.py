@@ -181,6 +181,23 @@ async def test_refusal_raises_claude_refusal_error(settings):
     assert excinfo.value.details["category"] == "cyber"
 
 
+async def test_refusal_without_stop_details_has_null_category(settings):
+    # The API may omit stop_details on a refusal; the category is then None
+    # rather than an AttributeError.
+    message = fake_message(text="", stop_reason="refusal", stop_details=None)
+    client = _client_returning(message)
+
+    with pytest.raises(ClaudeRefusalError) as excinfo:
+        await extract_sds(
+            content=b"data",
+            content_type="application/pdf",
+            client=client,
+            settings=settings,
+            request_id="req-3b",
+        )
+    assert excinfo.value.details["category"] is None
+
+
 async def test_max_tokens_with_invalid_json_raises_truncated_error(settings):
     message = fake_message(text='{"incomplete": tr', stop_reason="max_tokens")
     client = _client_returning(message)
@@ -255,6 +272,56 @@ async def test_invalid_json_retry_success_adds_warning_and_sums_usage(settings):
     assert result.usage.cache_creation_input_tokens == 400
 
 
+async def test_usage_without_cache_fields_sums_as_zero(settings):
+    # Cache-token fields may be absent from the API's usage object entirely
+    # (SDK/model dependent); usage summing must fall back to 0, not crash.
+    payload = minimal_sds_payload()
+    message = fake_message(
+        text=json.dumps(payload),
+        stop_reason="end_turn",
+        usage=SimpleNamespace(input_tokens=10, output_tokens=5),
+    )
+    client = _client_returning(message)
+
+    result = await extract_sds(
+        content=b"data",
+        content_type="application/pdf",
+        client=client,
+        settings=settings,
+        request_id="req-6g",
+    )
+
+    assert result.usage.input_tokens == 10
+    assert result.usage.cache_creation_input_tokens == 0
+    assert result.usage.cache_read_input_tokens == 0
+
+
+async def test_usage_with_null_cache_fields_sums_as_zero(settings):
+    payload = minimal_sds_payload()
+    message = fake_message(
+        text=json.dumps(payload),
+        stop_reason="end_turn",
+        usage=SimpleNamespace(
+            input_tokens=10,
+            output_tokens=5,
+            cache_creation_input_tokens=None,
+            cache_read_input_tokens=None,
+        ),
+    )
+    client = _client_returning(message)
+
+    result = await extract_sds(
+        content=b"data",
+        content_type="application/pdf",
+        client=client,
+        settings=settings,
+        request_id="req-6h",
+    )
+
+    assert result.usage.cache_creation_input_tokens == 0
+    assert result.usage.cache_read_input_tokens == 0
+
+
 async def test_truncated_response_is_not_retried(settings):
     message = fake_message(text='{"incomplete": tr', stop_reason="max_tokens")
     client = _client_returning(message)
@@ -293,6 +360,55 @@ async def test_refusal_on_retry_raises_refusal_error(settings):
             settings=settings,
             request_id="req-6d",
         )
+
+
+# --- malformed response content ----------------------------------------------
+
+
+async def test_leading_non_text_block_is_skipped(settings):
+    # A response whose first content block isn't text (e.g. a thinking block)
+    # must still be parsed from the text block that follows.
+    payload = minimal_sds_payload()
+    message = fake_message(
+        stop_reason="end_turn",
+        content=[
+            SimpleNamespace(type="thinking", thinking="考え中..."),
+            SimpleNamespace(type="text", text=json.dumps(payload)),
+        ],
+    )
+    client = _client_returning(message)
+
+    result = await extract_sds(
+        content=b"data",
+        content_type="application/pdf",
+        client=client,
+        settings=settings,
+        request_id="req-12",
+    )
+
+    assert result.warnings == []
+    assert result.data.schema_version == "2.1"
+
+
+async def test_response_without_text_block_raises_invalid_response(settings):
+    message = fake_message(
+        stop_reason="end_turn",
+        content=[SimpleNamespace(type="thinking", thinking="考え中...")],
+    )
+    client = _client_returning(message)
+
+    with pytest.raises(ClaudeResponseInvalidError):
+        await extract_sds(
+            content=b"data",
+            content_type="application/pdf",
+            client=client,
+            settings=settings,
+            request_id="req-13",
+        )
+
+    # A structurally unusable response (no text at all) isn't retried — only
+    # a text response that fails schema validation is.
+    assert client.messages.stream.call_count == 1
 
 
 # --- multi-SDS detection ------------------------------------------------------
@@ -408,6 +524,62 @@ async def test_grammar_size_error_is_remembered_across_requests(so_settings):
     assert "output_config" not in kwargs
 
 
+async def test_invalid_json_retry_keeps_structured_outputs(so_settings):
+    # When the first structured-outputs response fails schema validation, the
+    # automatic retry must stay on the structured-outputs path (output_config
+    # on both calls) — validation failure is not a grammar-size failure.
+    payload = minimal_sds_payload()
+    client = MagicMock()
+    client.messages.stream.side_effect = [
+        FakeStreamContext(fake_message(text="not json at all", stop_reason="end_turn")),
+        FakeStreamContext(fake_message(text=json.dumps(payload), stop_reason="end_turn")),
+    ]
+
+    result = await extract_sds(
+        content=b"data",
+        content_type="application/pdf",
+        client=client,
+        settings=so_settings,
+        request_id="req-14",
+    )
+
+    assert result.warnings == ["retried_invalid_response"]
+    assert client.messages.stream.call_count == 2
+    for call in client.messages.stream.call_args_list:
+        assert call.kwargs["output_config"]["format"]["schema"] == SDS_JSON_SCHEMA
+    assert extraction_service._grammar_too_large is False
+
+
+async def test_grammar_size_error_on_retry_call_falls_back(so_settings):
+    # The grammar-size 400 can also surface on the validation-failure retry
+    # (e.g. the API tightened its limit mid-process); the retry itself must
+    # then fall back to the prompt-embedded schema and still succeed.
+    payload = minimal_sds_payload()
+    client = MagicMock()
+    client.messages.stream.side_effect = [
+        FakeStreamContext(fake_message(text="not json at all", stop_reason="end_turn")),
+        _grammar_too_large_error(),
+        FakeStreamContext(fake_message(text=json.dumps(payload), stop_reason="end_turn")),
+    ]
+
+    result = await extract_sds(
+        content=b"data",
+        content_type="application/pdf",
+        client=client,
+        settings=so_settings,
+        request_id="req-15",
+    )
+
+    assert result.warnings == [
+        "retried_invalid_response",
+        "structured_outputs_unavailable",
+    ]
+    assert client.messages.stream.call_count == 3
+    _, final_kwargs = client.messages.stream.call_args
+    assert "output_config" not in final_kwargs
+    assert extraction_service._grammar_too_large is True
+
+
 async def test_non_grammar_bad_request_does_not_fall_back(so_settings):
     client = _client_raising(
         anthropic.BadRequestError("bad request", response=_fake_response(400), body=None)
@@ -489,3 +661,22 @@ async def test_anthropic_connection_error_maps_to_503(settings):
             request_id="req-8",
         )
     assert excinfo.value.status_code == 503
+
+
+async def test_unexpected_status_error_maps_to_500(settings):
+    # Any APIStatusError outside the explicitly mapped subclasses hits the
+    # catch-all and surfaces as a 500 rather than leaking the SDK exception.
+    exc = anthropic.APIStatusError(
+        "unexpected status", response=_fake_response(418), body=None
+    )
+    client = _client_raising(exc)
+
+    with pytest.raises(ClaudeUpstreamError) as excinfo:
+        await extract_sds(
+            content=b"data",
+            content_type="application/pdf",
+            client=client,
+            settings=settings,
+            request_id="req-8b",
+        )
+    assert excinfo.value.status_code == 500

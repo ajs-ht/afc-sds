@@ -1,0 +1,25 @@
+# Unit tests + coverage gate on every push/PR. Integration tests (real
+# Anthropic API) are excluded automatically by the `-m 'not integration'`
+# addopts in pyproject.toml, so no API key is needed here.
+name: CI
+
+on:
+  push:
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Run unit tests with coverage gate
+        run: pytest --cov=app --cov-branch --cov-fail-under=98

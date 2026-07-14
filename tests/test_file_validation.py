@@ -12,10 +12,15 @@ from app.core.exceptions import (
     UnsupportedFileTypeError,
 )
 from app.validation.file_validation import (
+    _has_valid_signature,
     check_content_length,
     slice_pdf_pages,
     validate_upload,
 )
+
+# Valid %PDF- magic bytes (passes the signature check) but no parsable PDF
+# structure behind them — e.g. a truncated download or a damaged scan.
+CORRUPT_PDF = b"%PDF-1.7\nthis is not a real pdf body"
 
 
 @pytest.fixture
@@ -97,6 +102,18 @@ def test_pdf_page_count_over_limit_rejected(sample_pdf_bytes, settings):
         validate_upload(content=sample_pdf_bytes, content_type="application/pdf", settings=settings)
 
 
+def test_corrupt_pdf_with_valid_magic_rejected(settings):
+    with pytest.raises(UnsupportedFileTypeError):
+        validate_upload(content=CORRUPT_PDF, content_type="application/pdf", settings=settings)
+
+
+def test_signature_check_passes_type_without_known_signature():
+    # Defensive branch: a content type with no registered magic signature is
+    # let through here — the allowed-MIME check in validate_upload is what
+    # actually rejects it.
+    assert _has_valid_signature(b"anything", "application/zip") is True
+
+
 # --- slice_pdf_pages ---------------------------------------------------------
 
 
@@ -139,6 +156,11 @@ def test_slice_pdf_pages_out_of_bounds_rejected(spec):
 def test_slice_pdf_pages_rejected_for_non_pdf():
     with pytest.raises(InvalidPageRangeError):
         slice_pdf_pages(b"\x89PNG...", "image/png", "1-2")
+
+
+def test_slice_pdf_pages_corrupt_pdf_rejected():
+    with pytest.raises(UnsupportedFileTypeError):
+        slice_pdf_pages(CORRUPT_PDF, "application/pdf", "1")
 
 
 def test_check_content_length_rejects_oversized_header(settings):

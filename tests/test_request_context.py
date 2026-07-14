@@ -3,9 +3,10 @@ and the JSON log formatter."""
 
 import json
 import logging
+import sys
 import uuid
 
-from app.core.logging import JsonFormatter
+from app.core.logging import JsonFormatter, configure_logging
 
 
 def test_every_response_carries_x_request_id(client):
@@ -55,3 +56,37 @@ def test_json_formatter_emits_valid_json():
     assert entry["logger"] == "afc_sds.access"
     assert entry["message"] == "request request_id=abc status=200"
     assert "time" in entry
+
+
+def test_json_formatter_includes_exc_info():
+    try:
+        raise ValueError("boom")
+    except ValueError:
+        record = logging.LogRecord(
+            name="afc_sds",
+            level=logging.ERROR,
+            pathname=__file__,
+            lineno=1,
+            msg="internal_error",
+            args=(),
+            exc_info=sys.exc_info(),
+        )
+
+    entry = json.loads(JsonFormatter().format(record))
+
+    assert "ValueError: boom" in entry["exc_info"]
+    assert "Traceback" in entry["exc_info"]
+
+
+def test_configure_logging_json_format_installs_json_formatter():
+    root = logging.getLogger()
+    saved_handlers = root.handlers[:]
+    saved_level = root.level
+    try:
+        configure_logging("DEBUG", "json")
+        assert root.level == logging.DEBUG
+        assert len(root.handlers) == 1
+        assert isinstance(root.handlers[0].formatter, JsonFormatter)
+    finally:
+        root.handlers = saved_handlers
+        root.setLevel(saved_level)

@@ -32,18 +32,25 @@ def minimal_sds_payload() -> dict:
     }
 
 
-def fake_message(*, text: str, stop_reason: str, stop_details=None):
-    return SimpleNamespace(
-        content=[SimpleNamespace(type="text", text=text)],
-        stop_reason=stop_reason,
-        stop_details=stop_details,
-        model="claude-opus-4-8",
-        usage=SimpleNamespace(
+def fake_message(*, text: str = "", stop_reason: str, stop_details=None, content=None, usage=None):
+    """Fake anthropic Message. `content` overrides the default single text
+    block (for multi-block / non-text responses); `usage` overrides the
+    default usage namespace (e.g. to omit cache-token fields)."""
+    if content is None:
+        content = [SimpleNamespace(type="text", text=text)]
+    if usage is None:
+        usage = SimpleNamespace(
             input_tokens=1000,
             output_tokens=500,
             cache_creation_input_tokens=200,
             cache_read_input_tokens=0,
-        ),
+        )
+    return SimpleNamespace(
+        content=content,
+        stop_reason=stop_reason,
+        stop_details=stop_details,
+        model="claude-opus-4-8",
+        usage=usage,
     )
 
 

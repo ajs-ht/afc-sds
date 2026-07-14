@@ -1,0 +1,1057 @@
+{
+  "schema": {
+    "$defs": {
+      "ApplicableRegulation": {
+        "additionalProperties": false,
+        "properties": {
+          "classification": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Classification"
+          },
+          "law_name": {
+            "title": "Law Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "law_name"
+        ],
+        "title": "ApplicableRegulation",
+        "type": "object"
+      },
+      "CompositionInfo": {
+        "additionalProperties": false,
+        "description": "Section 3: 組成及び成分情報 (Composition/information on ingredients).",
+        "properties": {
+          "ingredients": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/Ingredient"
+            },
+            "title": "Ingredients",
+            "type": "array"
+          },
+          "mixture_or_substance": {
+            "anyOf": [
+              {
+                "enum": [
+                  "substance",
+                  "mixture"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Mixture Or Substance"
+          },
+          "raw_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Raw Text"
+          }
+        },
+        "title": "CompositionInfo",
+        "type": "object"
+      },
+      "DetectedDocument": {
+        "additionalProperties": false,
+        "description": "A further SDS the model noticed in the same file but did not extract.\n\nExtraction always targets the first SDS in the file; each subsequent one\nis reported here so callers can re-submit it via the `pages` form field.\nPage numbers are 1-based, inclusive, and model-estimated (may be off by\na page on unusual layouts).",
+        "properties": {
+          "end_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "End Page"
+          },
+          "product_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Product Name"
+          },
+          "start_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Start Page"
+          }
+        },
+        "title": "DetectedDocument",
+        "type": "object"
+      },
+      "ExposureControls": {
+        "additionalProperties": false,
+        "description": "Section 8: ばく露防止及び保護措置 (Exposure controls/personal protection).",
+        "properties": {
+          "content_markdown": {
+            "title": "Content Markdown",
+            "type": "string"
+          },
+          "engineering_controls": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Engineering Controls"
+          },
+          "exposure_limits": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ExposureLimit"
+            },
+            "title": "Exposure Limits",
+            "type": "array"
+          },
+          "protective_equipment": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ProtectiveEquipment"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "section_number": {
+            "title": "Section Number",
+            "type": "integer"
+          },
+          "section_title_ja": {
+            "title": "Section Title Ja",
+            "type": "string"
+          }
+        },
+        "required": [
+          "section_number",
+          "section_title_ja",
+          "content_markdown"
+        ],
+        "title": "ExposureControls",
+        "type": "object"
+      },
+      "ExposureLimit": {
+        "additionalProperties": false,
+        "properties": {
+          "limit_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Limit Type"
+          },
+          "substance_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Substance Name"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Value"
+          }
+        },
+        "title": "ExposureLimit",
+        "type": "object"
+      },
+      "GHSClassification": {
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Category"
+          },
+          "hazard_class": {
+            "title": "Hazard Class",
+            "type": "string"
+          }
+        },
+        "required": [
+          "hazard_class"
+        ],
+        "title": "GHSClassification",
+        "type": "object"
+      },
+      "HazardsSummary": {
+        "additionalProperties": false,
+        "description": "Section 2: 危険有害性の要約 (Hazards identification).",
+        "properties": {
+          "ghs_classifications": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/GHSClassification"
+            },
+            "title": "Ghs Classifications",
+            "type": "array"
+          },
+          "hazard_statements": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Hazard Statements",
+            "type": "array"
+          },
+          "pictograms": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Pictograms",
+            "type": "array"
+          },
+          "precautionary_statements": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Precautionary Statements",
+            "type": "array"
+          },
+          "raw_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Raw Text"
+          },
+          "signal_word": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Signal Word"
+          }
+        },
+        "title": "HazardsSummary",
+        "type": "object"
+      },
+      "Ingredient": {
+        "additionalProperties": false,
+        "properties": {
+          "cas_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cas Number"
+          },
+          "concentration": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Concentration"
+          },
+          "substance_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Substance Name"
+          }
+        },
+        "title": "Ingredient",
+        "type": "object"
+      },
+      "ManufacturerContact": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Address"
+          },
+          "company_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Company Name"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Email"
+          },
+          "emergency_phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Emergency Phone"
+          },
+          "fax": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Fax"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Phone"
+          }
+        },
+        "title": "ManufacturerContact",
+        "type": "object"
+      },
+      "PhysicalChemicalProperties": {
+        "additionalProperties": false,
+        "description": "Section 9: 物理的及び化学的性質 (Physical and chemical properties).",
+        "properties": {
+          "appearance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Appearance"
+          },
+          "autoignition_temperature": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Autoignition Temperature"
+          },
+          "boiling_point": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Boiling Point"
+          },
+          "content_markdown": {
+            "title": "Content Markdown",
+            "type": "string"
+          },
+          "decomposition_temperature": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Decomposition Temperature"
+          },
+          "density": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Density"
+          },
+          "explosion_range_lower": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Explosion Range Lower"
+          },
+          "explosion_range_upper": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Explosion Range Upper"
+          },
+          "flash_point": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Flash Point"
+          },
+          "melting_point": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Melting Point"
+          },
+          "odor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Odor"
+          },
+          "partition_coefficient": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Partition Coefficient"
+          },
+          "ph": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ph"
+          },
+          "physical_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Physical State"
+          },
+          "section_number": {
+            "title": "Section Number",
+            "type": "integer"
+          },
+          "section_title_ja": {
+            "title": "Section Title Ja",
+            "type": "string"
+          },
+          "solubility_other": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Solubility Other"
+          },
+          "solubility_water": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Solubility Water"
+          },
+          "vapor_density": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Vapor Density"
+          },
+          "vapor_pressure": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Vapor Pressure"
+          },
+          "viscosity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Viscosity"
+          }
+        },
+        "required": [
+          "section_number",
+          "section_title_ja",
+          "content_markdown"
+        ],
+        "title": "PhysicalChemicalProperties",
+        "type": "object"
+      },
+      "ProductIdentification": {
+        "additionalProperties": false,
+        "description": "Section 1: 化学品及び会社情報 (Product and company identification).",
+        "properties": {
+          "manufacturer": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ManufacturerContact"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "product_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Product Code"
+          },
+          "product_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Product Name"
+          },
+          "raw_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Raw Text"
+          },
+          "recommended_use": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Recommended Use"
+          },
+          "supplier": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ManufacturerContact"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "title": "ProductIdentification",
+        "type": "object"
+      },
+      "ProtectiveEquipment": {
+        "additionalProperties": false,
+        "properties": {
+          "eyes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Eyes"
+          },
+          "hands": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Hands"
+          },
+          "respiratory": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Respiratory"
+          },
+          "skin_and_body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Skin And Body"
+          }
+        },
+        "title": "ProtectiveEquipment",
+        "type": "object"
+      },
+      "RegulatoryInfo": {
+        "additionalProperties": false,
+        "description": "Section 15: 適用法令 (Regulatory information).",
+        "properties": {
+          "content_markdown": {
+            "title": "Content Markdown",
+            "type": "string"
+          },
+          "regulations": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ApplicableRegulation"
+            },
+            "title": "Regulations",
+            "type": "array"
+          },
+          "section_number": {
+            "title": "Section Number",
+            "type": "integer"
+          },
+          "section_title_ja": {
+            "title": "Section Title Ja",
+            "type": "string"
+          }
+        },
+        "required": [
+          "section_number",
+          "section_title_ja",
+          "content_markdown"
+        ],
+        "title": "RegulatoryInfo",
+        "type": "object"
+      },
+      "SDSSection": {
+        "additionalProperties": false,
+        "description": "Generic faithful-text wrapper for sections without dedicated fields.",
+        "properties": {
+          "content_markdown": {
+            "title": "Content Markdown",
+            "type": "string"
+          },
+          "section_number": {
+            "title": "Section Number",
+            "type": "integer"
+          },
+          "section_title_ja": {
+            "title": "Section Title Ja",
+            "type": "string"
+          }
+        },
+        "required": [
+          "section_number",
+          "section_title_ja",
+          "content_markdown"
+        ],
+        "title": "SDSSection",
+        "type": "object"
+      },
+      "TransportInfo": {
+        "additionalProperties": false,
+        "description": "Section 14: 輸送上の注意 (Transport information).",
+        "properties": {
+          "content_markdown": {
+            "title": "Content Markdown",
+            "type": "string"
+          },
+          "emergency_response_guide": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Emergency Response Guide"
+          },
+          "marine_pollutant": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Marine Pollutant"
+          },
+          "packing_group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Packing Group"
+          },
+          "section_number": {
+            "title": "Section Number",
+            "type": "integer"
+          },
+          "section_title_ja": {
+            "title": "Section Title Ja",
+            "type": "string"
+          },
+          "transport_hazard_class": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Transport Hazard Class"
+          },
+          "un_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Un Number"
+          },
+          "un_proper_shipping_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Un Proper Shipping Name"
+          }
+        },
+        "required": [
+          "section_number",
+          "section_title_ja",
+          "content_markdown"
+        ],
+        "title": "TransportInfo",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "additional_documents": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/DetectedDocument"
+        },
+        "title": "Additional Documents",
+        "type": "array"
+      },
+      "extraction_notes": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Extraction Notes"
+      },
+      "schema_version": {
+        "default": "2.1",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "section_10_stability_reactivity": {
+        "$ref": "#/$defs/SDSSection"
+      },
+      "section_11_toxicological": {
+        "$ref": "#/$defs/SDSSection"
+      },
+      "section_12_ecological": {
+        "$ref": "#/$defs/SDSSection"
+      },
+      "section_13_disposal": {
+        "$ref": "#/$defs/SDSSection"
+      },
+      "section_14_transport": {
+        "$ref": "#/$defs/TransportInfo"
+      },
+      "section_15_regulatory": {
+        "$ref": "#/$defs/RegulatoryInfo"
+      },
+      "section_16_other": {
+        "$ref": "#/$defs/SDSSection"
+      },
+      "section_1_product_and_company": {
+        "$ref": "#/$defs/ProductIdentification"
+      },
+      "section_2_hazards_identification": {
+        "$ref": "#/$defs/HazardsSummary"
+      },
+      "section_3_composition": {
+        "$ref": "#/$defs/CompositionInfo"
+      },
+      "section_4_first_aid": {
+        "$ref": "#/$defs/SDSSection"
+      },
+      "section_5_firefighting": {
+        "$ref": "#/$defs/SDSSection"
+      },
+      "section_6_accidental_release": {
+        "$ref": "#/$defs/SDSSection"
+      },
+      "section_7_handling_storage": {
+        "$ref": "#/$defs/SDSSection"
+      },
+      "section_8_exposure_controls": {
+        "$ref": "#/$defs/ExposureControls"
+      },
+      "section_9_physical_chemical_properties": {
+        "$ref": "#/$defs/PhysicalChemicalProperties"
+      }
+    },
+    "required": [
+      "section_1_product_and_company",
+      "section_2_hazards_identification",
+      "section_3_composition",
+      "section_4_first_aid",
+      "section_5_firefighting",
+      "section_6_accidental_release",
+      "section_7_handling_storage",
+      "section_8_exposure_controls",
+      "section_9_physical_chemical_properties",
+      "section_10_stability_reactivity",
+      "section_11_toxicological",
+      "section_12_ecological",
+      "section_13_disposal",
+      "section_14_transport",
+      "section_15_regulatory",
+      "section_16_other"
+    ],
+    "title": "SDSDocument",
+    "type": "object"
+  },
+  "schema_version": "2.1"
+}
