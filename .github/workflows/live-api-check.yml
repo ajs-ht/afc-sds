@@ -19,7 +19,7 @@ jobs:
   live-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check for API key secret
         id: key
@@ -33,7 +33,7 @@ jobs:
             echo "ANTHROPIC_API_KEY secret is not configured; skipping." >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         if: steps.key.outputs.present == 'true'
         with:
           distribution: temurin
