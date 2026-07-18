@@ -1,26 +1,26 @@
-FROM python:3.12-slim AS builder
+FROM maven:3.9-eclipse-temurin-21 AS builder
 
 WORKDIR /build
 
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+COPY pom.xml ./
+RUN mvn -q -B dependency:go-offline
 
-COPY pyproject.toml ./
-COPY app ./app
+COPY src ./src
+RUN mvn -q -B package -DskipTests
 
-RUN pip install --no-cache-dir .
+FROM eclipse-temurin:21-jre AS runtime
 
-FROM python:3.12-slim AS runtime
+# curl is only used by the docker-compose healthcheck.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --system app && useradd --system --gid app app
 
-COPY --from=builder /opt/venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
 WORKDIR /app
-COPY app ./app
+COPY --from=builder /build/target/afc-sds-*.jar app.jar
 
 USER app
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["java", "-jar", "app.jar"]

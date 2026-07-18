@@ -1,6 +1,6 @@
-# Unit tests + coverage gate on every push/PR. Integration tests (real
-# Anthropic API) are excluded automatically by the `-m 'not integration'`
-# addopts in pyproject.toml, so no API key is needed here.
+# Unit tests + coverage gate on every push/PR. The live-API integration test
+# (LiveExtractionTest) is disabled automatically unless RUN_INTEGRATION=1 and
+# a real ANTHROPIC_API_KEY are set, so no API key is needed here.
 name: CI
 
 on:
@@ -14,12 +14,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-java@v4
         with:
-          python-version: "3.12"
-
-      - name: Install dependencies
-        run: pip install -e ".[dev]"
+          distribution: temurin
+          java-version: "21"
+          cache: maven
 
       - name: Run unit tests with coverage gate
-        run: pytest --cov=app --cov-branch --cov-fail-under=98
+        run: mvn -B test

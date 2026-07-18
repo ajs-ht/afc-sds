@@ -7,24 +7,28 @@ Web UIやCLIは提供せず、他システムから呼び出されるHTTP API専
 
 ## 構成
 
-- FastAPI (Python 3.12)
-- Anthropic Claude API（既定 `claude-opus-4-8`、`MODEL_ID` で変更可） — PDF/画像のネイティブ入力 + Structured Outputs (`output_config.format`)
+- Spring Boot (Java 21) + Maven
+- Anthropic Claude API（公式 Java SDK。既定 `claude-opus-4-8`、`MODEL_ID` で変更可） — PDF/画像のネイティブ入力 + Structured Outputs (`output_config.format`)
 - 認証: `X-API-Key` ヘッダによる簡易認証
+
+> 本アプリはPython (FastAPI) 実装からの移植です。APIの外部仕様（エンドポイント・
+> リクエスト/レスポンス形式・エラー形式・環境変数）は従来と互換です。
 
 ### アーキテクチャ概要
 
-`POST /v1/sds/extract` のリクエストは次の順に処理されます。
+`POST /v1/sds/extract` のリクエストは次の順に処理されます（パッケージは `jp.co.ajs.afcsds`）。
 
-1. `app/main.py` — ミドルウェアが `request_id` を採番（レスポンスの `X-Request-ID` として返却、
-   全ログ・エラー本文に伝播）し、例外は一箇所の `AppError` ハンドラで統一形式に変換します。
-2. `app/dependencies.py` — `X-API-Key` の定時間比較による認証。
-3. `app/validation/file_validation.py` — サイズ/MIME/PDFページ数の検証と、`pages`
-   フォームフィールドによるページ切り出し。
-4. `app/services/extraction_service.py` — Claude呼び出し、Pydanticによるスキーマ検証、
-   検証失敗時の1回だけの自動再試行。
-5. `app/services/postvalidation.py` — CAS番号やGHSピクトグラム等のドメイン固有チェック
+1. `web/RequestIdFilter` — `request_id` を採番（レスポンスの `X-Request-ID` として返却、
+   全ログ・エラー本文に伝播）し、例外は `web/GlobalExceptionHandler` で統一形式に変換します。
+2. `web/ApiKeyInterceptor` — `X-API-Key` の定時間比較による認証（`/v1/**` 全ルート）。
+3. `validation/FileValidation` — サイズ/MIME/PDFページ数の検証と、`pages`
+   フォームフィールドによるページ切り出し（Apache PDFBox）。
+4. `service/ExtractionService` + `service/AnthropicClaudeGateway` — Claude呼び出し、
+   JSON Schemaによる厳密検証、検証失敗時の1回だけの自動再試行。
+5. `service/PostValidation` — CAS番号やGHSピクトグラム等のドメイン固有チェック
    （`warnings` として通知、拒否はしない）。
-6. `app/schemas/sds.py` — 出力の型定義 (`SDSDocument`) とJSON Schema。
+6. `schema/SdsSchema` + `schema/SdsDocument` — 出力の型定義とJSON Schema
+   （`src/main/resources/sds_json_schema.json`）。
 
 より実装レベルの詳細はエージェント向けの `CLAUDE.md` を参照してください。
 
@@ -51,21 +55,21 @@ Web UIやCLIは提供せず、他システムから呼び出されるHTTP API専
 
 出力のスキーマ準拠は次の方式で保証されます。
 
-1. **プロンプト埋め込み + Pydantic事後検証**（既定） — スキーマをシステムプロンプトに
-   埋め込み、レスポンスをPydanticで厳密検証（`additionalProperties: false` 相当）してから
-   返却します。
+1. **プロンプト埋め込み + JSON Schema事後検証**（既定） — スキーマをシステムプロンプトに
+   埋め込み、レスポンスをJSON Schemaで厳密検証（`additionalProperties: false` を含む）してから
+   型付きドキュメントへマッピングして返却します。
 2. **Structured Outputs** (`output_config.format`) — `USE_STRUCTURED_OUTPUTS=true` でオプトイン。
    APIレベルの制約付きデコードになりますが、**現行のClaude APIではSDSスキーマが
    コンパイル済みグラマーの複雑度上限を超えるため利用できません**（2026-07に `claude-opus-4-8`
    で実API検証。Optionalフィールド20個のフラットなスキーマですら拒否されるため、Optional中心の
-   SDSスキーマは載りません。詳細は `app/services/prompts.py` のdocstring参照）。この上限は
+   SDSスキーマは載りません。詳細は `service/Prompts.java` のドキュメント参照）。この上限は
    `MODEL_ID` を他モデルに変更した場合は未検証のため、切り替え時は再テストを推奨します。
    有効化した場合もグラマー超過を検知すると方式1へ自動フォールバックし、`warnings` に
    `structured_outputs_unavailable` を付けて通知するため、API側の上限緩和後に安全に
    再テストできます。
 
-どちらの経路でもレスポンスはPydanticで検証されてから返却されます。
-Pydantic検証に失敗した場合(かつmax_tokens打ち切りでない場合)は自動で1回だけ再抽出
+どちらの経路でもレスポンスはJSON Schemaで検証されてから返却されます。
+検証に失敗した場合(かつmax_tokens打ち切りでない場合)は自動で1回だけ再抽出
 してから確定させます(再試行時は `warnings` に `retried_invalid_response` を付与、
 `usage` は全呼び出しの合算)。
 なお `temperature` 等のサンプリングパラメータは現行モデル(Opus 4.7以降)ではAPIから
@@ -106,7 +110,7 @@ cp .env.example .env
 ### モデルの選択
 
 `MODEL_ID` はデプロイ単位の設定で、値を変えるだけでコード変更なしに使用モデルを
-切り替えられます（`app/services/extraction_service.py` のリクエスト構築処理にモデル名
+切り替えられます（`service/AnthropicClaudeGateway.java` のリクエスト構築処理にモデル名
 依存の分岐はありません）。
 
 - `claude-opus-4-8`（既定） — 精度優先。コストは高め。
@@ -135,8 +139,8 @@ cp .env.example .env
 | `LOG_FORMAT` | `text` | `text` または `json`（下記「ログ」参照） |
 
 このほか、許可するアップロードのMIMEタイプ (`application/pdf` / `image/png` / `image/jpeg` /
-`image/webp`) は `app/config.py` の `allowed_mime_types` にハードコードされており、対応する
-環境変数はありません（変更する場合はコードを編集してください）。
+`image/webp`) は `config/AppSettings.java` の `ALLOWED_MIME_TYPES` にハードコードされており、
+対応する環境変数はありません（変更する場合はコードを編集してください）。
 
 ### ローカル実行 (Docker)
 
@@ -144,18 +148,20 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Dockerを使わない場合は、依存関係インストール後にuvicornで直接起動できます。
+Dockerを使わない場合は、環境変数を設定してMavenで直接起動できます（要 Java 21）。
 
 ```bash
-pip install -e ".[dev]"
-uvicorn app.main:app
+ANTHROPIC_API_KEY=sk-ant-... API_KEY=change-me mvn spring-boot:run
 ```
+
+（`.env` の自動読み込みはDocker実行時のみです。ローカル起動では環境変数を
+シェルから渡してください。）
 
 ### 動作確認
 
 ```bash
 curl -X POST http://localhost:8000/v1/sds/extract \
-  -H "X-API-Key: <settings.api_key の値>" \
+  -H "X-API-Key: <API_KEY の値>" \
   -F "file=@sample_sds.pdf"
 ```
 
@@ -163,7 +169,7 @@ curl -X POST http://localhost:8000/v1/sds/extract \
 
 ```bash
 curl -X POST http://localhost:8000/v1/sds/extract \
-  -H "X-API-Key: <settings.api_key の値>" \
+  -H "X-API-Key: <API_KEY の値>" \
   -F "file=@sample_sds.pdf" \
   -F "pages=6-11"
 ```
@@ -177,10 +183,11 @@ curl http://localhost:8000/healthz
 ## 開発
 
 ```bash
-pip install -e ".[dev]"
-pytest                              # ユニットテスト（実APIキー不要。デフォルトのpytest実行対象）
-pytest --cov=app --cov-branch --cov-fail-under=98   # カバレッジゲート付き（CIと同じ実行内容）
-RUN_INTEGRATION=1 pytest -m integration   # 統合テスト（実ANTHROPIC_API_KEYが必要。実APIを呼ぶため既定では除外）
+mvn test                            # ユニットテスト + カバレッジゲート（実APIキー不要）
+mvn test -Dtest=FileValidationTest  # テストクラス単位の実行
+
+# 統合テスト（実ANTHROPIC_API_KEYが必要。実APIを呼ぶため既定では自動スキップ）
+RUN_INTEGRATION=1 ANTHROPIC_API_KEY=sk-ant-... mvn test -Dtest=LiveExtractionTest
 ```
 
 リンタ・フォーマッタは導入していません。
@@ -188,43 +195,22 @@ RUN_INTEGRATION=1 pytest -m integration   # 統合テスト（実ANTHROPIC_API_K
 ### CI
 
 GitHub Actions（`.github/workflows/ci.yml`）が push / PR ごとにユニットテストを
-実行し、カバレッジが 98% を下回ると失敗します。統合テストは pyproject の
-`addopts` により自動除外されるため、CI に API キーは不要です。
+実行し、JaCoCoの行カバレッジが 90% を下回ると失敗します（Anthropic SDKアダプタ
+`AnthropicClaudeGateway` と起動クラスはゲート対象外。ライブAPIテストは環境変数が
+無い限り自動スキップされるため、CI に API キーは不要です）。
 
 ### スキーマ変更時の手順
 
-`SDSDocument`（出力スキーマ）はバージョン付きの公開契約です。出力の形を変える
-変更は `tests/test_schema.py::test_schema_change_requires_version_bump` が検知して
-失敗します。その場合は次の3点をセットで行ってください:
+出力スキーマ（`src/main/resources/sds_json_schema.json` と `schema/SdsDocument.java`）は
+バージョン付きの公開契約です。出力の形を変える変更は
+`SdsSchemaTest.schemaChangeRequiresVersionBump` が検知して失敗します。その場合は
+次の4点をセットで行ってください:
 
-1. `app/schemas/sds.py` の `SCHEMA_VERSION` をバンプ
-2. README の該当箇所（[出力スキーマ](#出力スキーマ-schema_version-21) など）を更新
-3. スナップショットを再生成:
-   `python -c "import json, pathlib; from app.schemas.sds import SDS_JSON_SCHEMA, SCHEMA_VERSION; pathlib.Path('tests/fixtures/schema_snapshot.json').write_text(json.dumps({'schema_version': SCHEMA_VERSION, 'schema': SDS_JSON_SCHEMA}, ensure_ascii=False, indent=2, sort_keys=True) + '\n', encoding='utf-8')"`
-
-### 実世界のSDSサンプルによる検証
-
-`tests/fixtures/real_world/` に実際のSDSファイル（PDF/PNG/JPEG/WebP）を置くと、
-それぞれについて実際に `/v1/sds/extract` を呼び出しJSON生成を検証するテストが有効になります。
-
-```bash
-RUN_INTEGRATION=1 ANTHROPIC_API_KEY=sk-ant-... \
-  pytest -m integration tests/integration/test_real_world_extraction.py -s
-```
-
-- 生成されたJSONは `tests/fixtures/real_world/_results/<ファイル名>.json` に書き出され、目視で確認できます。
-- サンプルファイル自体・生成結果はいずれもgitignore対象で、コミットされません（SDSは配布元の著作物のため）。
-- サンプルが1件も無い場合はテストが失敗ではなくスキップされるため、通常の開発/CIには影響しません。
-
-#### フィールド単位の精度測定
-
-サンプルの隣に正解データ `<ファイル名>.expected.json`（抽出結果 `data` と同じ形。
-検証済みフィールドだけの部分ドキュメントで可）を置くと、構造化フィールドを
-フラット化して突合したフィールド単位の一致率レポートが出力され、
-`_results/<ファイル名>.accuracy.json` に書き出されます。原文保持用の
-`content_markdown` / `raw_text` は表記揺れがあるため採点対象外です。
-プロンプトやモデルの変更前後で精度を定量比較する用途を想定しています
-（レポートのみで、一致率によってテストが失敗することはありません）。
+1. `src/main/resources/sds_json_schema.json` と `schema/SdsDocument.java` を同時に更新
+2. `schema/SdsSchema.java` の `SCHEMA_VERSION` をバンプ
+3. README の該当箇所（[出力スキーマ](#出力スキーマ-schema_version-21) など）を更新
+4. スナップショット `src/test/resources/fixtures/schema_snapshot.json` を再生成
+   （`{"schema_version": "<新バージョン>", "schema": <スキーマ本体>}` の形式）
 
 ## API
 
@@ -289,7 +275,7 @@ RUN_INTEGRATION=1 ANTHROPIC_API_KEY=sk-ant-... \
 `schema_version` が契約のリビジョンを示します。
 
 ```bash
-curl http://localhost:8000/v1/sds/schema -H "X-API-Key: <settings.api_key の値>"
+curl http://localhost:8000/v1/sds/schema -H "X-API-Key: <API_KEY の値>"
 ```
 
 ## ログ
