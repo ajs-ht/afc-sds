@@ -70,10 +70,11 @@
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
       </plugin>
-      <!-- Coverage gate, mirroring the original CI setup. The Anthropic SDK
-           adapter (AnthropicClaudeGateway) is exercised only by the opt-in
-           live integration test, and the application bootstrap has no logic —
-           both are excluded from the gate. -->
+      <!-- Coverage gate, mirroring the original CI setup. The application
+           bootstrap has no logic and is excluded. The Anthropic SDK adapter
+           (AnthropicClaudeGateway) is covered by unit tests against a mocked
+           client; only its live streaming I/O needs the opt-in live
+           integration test. -->
       <plugin>
         <groupId>org.jacoco</groupId>
         <artifactId>jacoco-maven-plugin</artifactId>
@@ -81,7 +82,6 @@
         <configuration>
           <excludes>
             <exclude>jp/co/ajs/afcsds/AfcSdsApplication.class</exclude>
-            <exclude>jp/co/ajs/afcsds/service/AnthropicClaudeGateway*</exclude>
           </excludes>
         </configuration>
         <executions>

@@ -57,6 +57,23 @@ public final class TestFixtures {
         return root;
     }
 
+    /**
+     * A payload populating every field in the schema — the counterpart of
+     * {@link #minimalSdsPayload()}. Exercises the nested structures
+     * (manufacturer/supplier contacts, GHS classifications, exposure limits,
+     * protective equipment, regulations) that the minimal payload leaves
+     * empty, so a mismatched {@code @JsonProperty} in {@code SdsDocument}
+     * can't hide behind defaults.
+     */
+    public static ObjectNode maximalSdsPayload() {
+        try (InputStream in =
+                TestFixtures.class.getResourceAsStream("/fixtures/maximal_sds_payload.json")) {
+            return (ObjectNode) MAPPER.readTree(in);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
     public static ClaudeMessage fakeMessage(String text, String stopReason) {
         return fakeMessage(text, stopReason, null);
     }

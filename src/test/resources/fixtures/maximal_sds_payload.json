@@ -1,0 +1,163 @@
+{
+  "schema_version": "2.1",
+  "section_1_product_and_company": {
+    "product_name": "テスト洗浄剤A",
+    "product_code": "TC-100",
+    "recommended_use": "金属部品の脱脂洗浄",
+    "manufacturer": {
+      "company_name": "テスト化学株式会社",
+      "address": "東京都千代田区1-1-1",
+      "phone": "03-1234-5678",
+      "fax": "03-1234-5679",
+      "emergency_phone": "0120-000-000",
+      "email": "sds@example.co.jp"
+    },
+    "supplier": {
+      "company_name": "テスト商事株式会社",
+      "address": "大阪府大阪市2-2-2",
+      "phone": "06-1234-5678",
+      "fax": "06-1234-5679",
+      "emergency_phone": "0120-111-111",
+      "email": "eigyo@example.co.jp"
+    },
+    "raw_text": "製品名: テスト洗浄剤A ..."
+  },
+  "section_2_hazards_identification": {
+    "ghs_classifications": [
+      {"hazard_class": "引火性液体", "category": "区分2"},
+      {"hazard_class": "眼刺激性", "category": null}
+    ],
+    "signal_word": "危険",
+    "hazard_statements": ["H225 引火性の高い液体及び蒸気"],
+    "precautionary_statements": ["P210 熱、高温のもの、火花、裸火及び他の着火源から遠ざけること。"],
+    "pictograms": ["GHS02", "GHS07"],
+    "raw_text": "危険有害性の要約 ..."
+  },
+  "section_3_composition": {
+    "mixture_or_substance": "mixture",
+    "ingredients": [
+      {
+        "substance_name": "エタノール",
+        "cas_number": "64-17-5",
+        "concentration": "60~70%"
+      },
+      {
+        "substance_name": "水",
+        "cas_number": "7732-18-5",
+        "concentration": "30~40%"
+      }
+    ],
+    "raw_text": "組成及び成分情報 ..."
+  },
+  "section_4_first_aid": {
+    "section_number": 4,
+    "section_title_ja": "応急措置",
+    "content_markdown": "吸入した場合: 空気の新鮮な場所に移す。"
+  },
+  "section_5_firefighting": {
+    "section_number": 5,
+    "section_title_ja": "火災時の措置",
+    "content_markdown": "消火剤: 泡消火剤、粉末消火剤。"
+  },
+  "section_6_accidental_release": {
+    "section_number": 6,
+    "section_title_ja": "漏出時の措置",
+    "content_markdown": "着火源を速やかに取り除く。"
+  },
+  "section_7_handling_storage": {
+    "section_number": 7,
+    "section_title_ja": "取扱い及び保管上の注意",
+    "content_markdown": "換気の良い場所で取り扱うこと。"
+  },
+  "section_8_exposure_controls": {
+    "section_number": 8,
+    "section_title_ja": "ばく露防止及び保護措置",
+    "exposure_limits": [
+      {
+        "substance_name": "エタノール",
+        "limit_type": "日本産業衛生学会 許容濃度",
+        "value": "1000ppm"
+      }
+    ],
+    "engineering_controls": "局所排気装置を設置すること。",
+    "protective_equipment": {
+      "respiratory": "有機ガス用防毒マスク",
+      "hands": "耐溶剤性保護手袋",
+      "eyes": "保護眼鏡",
+      "skin_and_body": "長袖作業衣"
+    },
+    "content_markdown": "ばく露防止及び保護措置 ..."
+  },
+  "section_9_physical_chemical_properties": {
+    "section_number": 9,
+    "section_title_ja": "物理的及び化学的性質",
+    "physical_state": "液体",
+    "appearance": "無色透明",
+    "odor": "アルコール臭",
+    "ph": "約7",
+    "melting_point": "-114℃",
+    "boiling_point": "78℃",
+    "flash_point": "約13℃(密閉式)",
+    "autoignition_temperature": "363℃",
+    "decomposition_temperature": "データなし",
+    "explosion_range_lower": "3.3vol%",
+    "explosion_range_upper": "19vol%",
+    "vapor_pressure": "5.9kPa(20℃)",
+    "vapor_density": "1.59(空気=1)",
+    "density": "0.87g/cm3(20℃)",
+    "solubility_water": "任意の割合で混和する",
+    "solubility_other": "エーテルに可溶",
+    "partition_coefficient": "log Pow -0.32",
+    "viscosity": "1.2mPa・s(20℃)",
+    "content_markdown": "物理的及び化学的性質 ..."
+  },
+  "section_10_stability_reactivity": {
+    "section_number": 10,
+    "section_title_ja": "安定性及び反応性",
+    "content_markdown": "通常の取扱い条件では安定。"
+  },
+  "section_11_toxicological": {
+    "section_number": 11,
+    "section_title_ja": "有害性情報",
+    "content_markdown": "急性毒性(経口): LD50 7060mg/kg(ラット)"
+  },
+  "section_12_ecological": {
+    "section_number": 12,
+    "section_title_ja": "環境影響情報",
+    "content_markdown": "魚毒性: LC50 11200mg/L(96hr)"
+  },
+  "section_13_disposal": {
+    "section_number": 13,
+    "section_title_ja": "廃棄上の注意",
+    "content_markdown": "都道府県知事の許可を受けた産業廃棄物処理業者に委託する。"
+  },
+  "section_14_transport": {
+    "section_number": 14,
+    "section_title_ja": "輸送上の注意",
+    "un_number": "UN1170",
+    "un_proper_shipping_name": "エタノール溶液",
+    "transport_hazard_class": "クラス3",
+    "packing_group": "II",
+    "marine_pollutant": "非該当",
+    "emergency_response_guide": "127",
+    "content_markdown": "輸送上の注意 ..."
+  },
+  "section_15_regulatory": {
+    "section_number": 15,
+    "section_title_ja": "適用法令",
+    "regulations": [
+      {"law_name": "消防法", "classification": "危険物第四類 アルコール類"},
+      {"law_name": "労働安全衛生法", "classification": null}
+    ],
+    "content_markdown": "適用法令 ..."
+  },
+  "section_16_other": {
+    "section_number": 16,
+    "section_title_ja": "その他の情報",
+    "content_markdown": "記載内容は現時点で入手できる資料に基づいて作成した。"
+  },
+  "additional_documents": [
+    {"product_name": "テスト洗浄剤B", "start_page": 6, "end_page": 11}
+  ],
+  "extraction_notes": "9ページの表の一部が不鮮明のため判読できず。"
+}
