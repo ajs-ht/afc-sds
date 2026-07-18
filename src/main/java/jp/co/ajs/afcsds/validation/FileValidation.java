@@ -15,6 +15,8 @@ import jp.co.ajs.afcsds.core.AppExceptions.InvalidPageRangeException;
 import jp.co.ajs.afcsds.core.AppExceptions.TooManyPagesException;
 import jp.co.ajs.afcsds.core.AppExceptions.UnsupportedFileTypeException;
 import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.io.IOUtils;
+import org.apache.pdfbox.io.RandomAccessReadBuffer;
 import org.apache.pdfbox.multipdf.PageExtractor;
 import org.apache.pdfbox.pdmodel.PDDocument;
 
@@ -198,7 +200,12 @@ public final class FileValidation {
     }
 
     private static PDDocument loadPdf(byte[] content) throws IOException {
-        return Loader.loadPDF(content);
+        // Untrusted input: back PDFBox's stream cache with temp files instead
+        // of the heap, so a highly-compressed PDF ("decompression bomb")
+        // inflates onto disk — bounded by disk space and cleaned up by
+        // PDDocument.close() — rather than exhausting service memory.
+        return Loader.loadPDF(
+                new RandomAccessReadBuffer(content), IOUtils.createTempFileOnlyStreamCache());
     }
 
     private static Map<String, Object> mapOfNullable(String key, Object value) {

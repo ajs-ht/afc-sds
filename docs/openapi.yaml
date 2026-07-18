@@ -1,0 +1,219 @@
+# afc-sds のOpenAPI仕様(手書き・静的ファイル)。
+#
+# 抽出結果 `data` の詳細スキーマは意図的にここへ複製していません — その正本は
+# 実行時に GET /v1/sds/schema が返すバージョン付きJSON Schemaであり、連携先は
+# そちらから型生成してください。このファイルはエンドポイント・認証・エラー
+# 形式というHTTP層の契約を機械可読にするものです。
+# エンドポイントや共通エラー形式を変更した場合はこのファイルも更新すること。
+openapi: 3.1.0
+info:
+  title: afc-sds
+  version: "0.1.0"
+  description: |
+    SDS(安全データシート、JIS Z 7253準拠)をAI-OCR(Claude API)で読み取り、
+    標準16項目構成の構造化JSONを返すAPI。
+
+    `data` フィールドの完全なJSON Schemaは `GET /v1/sds/schema` が返します
+    (`schema_version` が契約リビジョン)。複数SDSを含むPDFの扱い・warnings の
+    種別・環境変数などの運用詳細は README.md を参照してください。
+
+servers:
+  - url: http://localhost:8000
+
+security:
+  - ApiKeyAuth: []
+
+paths:
+  /healthz:
+    get:
+      summary: ヘルスチェック(認証不要)
+      security: []
+      responses:
+        "200":
+          description: 稼働中
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    const: ok
+
+  /v1/sds/extract:
+    post:
+      summary: SDSファイルからの構造化JSON抽出
+      description: |
+        PDFまたは画像(PNG/JPEG/WebP)のSDSを受け取り、JIS Z 7253の16項目構成の
+        構造化JSONを返します。複数SDSが連結されたPDFでは先頭の1件のみを抽出し、
+        2件目以降は `data.additional_documents` に報告されます(`pages` で再抽出)。
+        同時処理数の上限(`MAX_CONCURRENT_EXTRACTIONS`)に達している間は 503
+        `server_busy` が返り、`Retry-After` ヘッダが再試行までの秒数を示します。
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: SDS本体 (application/pdf / image/png / image/jpeg / image/webp)
+                pages:
+                  type: string
+                  description: |
+                    抽出対象ページ(PDFのみ)。1始まり・両端含む。"6" または "6-11"。
+                  examples: ["6", "6-11"]
+      responses:
+        "200":
+          description: 抽出成功
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, warnings, model, usage]
+                properties:
+                  data:
+                    type: object
+                    description: >
+                      JIS Z 7253 16項目の構造化SDS。完全なスキーマは
+                      GET /v1/sds/schema を参照(このファイルには複製しない)。
+                  warnings:
+                    type: array
+                    items:
+                      type: string
+                    description: 疑わしい値・特記事項の通知(READMEの警告一覧参照)。拒否ではない。
+                  model:
+                    type: string
+                    description: 実際に抽出へ使われたClaudeモデルID
+                  usage:
+                    $ref: "#/components/schemas/ExtractionUsage"
+        "400":
+          description: >
+            入力不正 (unsupported_file_type / file_too_large / too_many_pages /
+            empty_file / invalid_page_range / invalid_document)
+          $ref: "#/components/responses/Error"
+        "401":
+          description: X-API-Key 不正・欠落 (unauthorized)
+          $ref: "#/components/responses/Error"
+        "422":
+          description: リクエスト形式エラーまたは抽出拒否 (validation_error / extraction_refused)
+          $ref: "#/components/responses/Error"
+        "502":
+          description: モデル出力の異常 (extraction_truncated / extraction_invalid_response)
+          $ref: "#/components/responses/Error"
+        "503":
+          description: 過負荷または上流障害 (server_busy / upstream_error)。Retry-After 付きの場合あり
+          $ref: "#/components/responses/RetryableError"
+        "500":
+          description: サーバー内部エラー (upstream_error / internal_error)
+          $ref: "#/components/responses/Error"
+
+  /v1/sds/schema:
+    get:
+      summary: 抽出結果 data のJSON Schema取得
+      responses:
+        "200":
+          description: バージョン付きJSON Schema
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schema_version, json_schema]
+                properties:
+                  schema_version:
+                    type: string
+                    description: 出力契約のリビジョン (例 "2.1")
+                  json_schema:
+                    type: object
+                    description: data フィールドのJSON Schema (draft 2020-12)
+        "401":
+          description: X-API-Key 不正・欠落
+          $ref: "#/components/responses/Error"
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: 共有シークレット (環境変数 API_KEY)。ローテーション中は新旧どちらの値も有効。
+
+  headers:
+    XRequestId:
+      description: |
+        リクエスト相関ID。リクエストの X-Request-ID ヘッダ(英数と ._- のみ、
+        64文字以内)を尊重し、無い/不正な場合はサーバーがUUIDを採番する。
+        サーバーログの request_id と一致。
+      schema:
+        type: string
+    RetryAfter:
+      description: 再試行までの推奨待機秒数
+      schema:
+        type: string
+
+  schemas:
+    ExtractionUsage:
+      type: object
+      description: このリクエストで消費したClaude APIトークン数(再試行があれば合算)
+      required:
+        [input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens]
+      properties:
+        input_tokens:
+          type: integer
+          format: int64
+        output_tokens:
+          type: integer
+          format: int64
+        cache_creation_input_tokens:
+          type: integer
+          format: int64
+        cache_read_input_tokens:
+          type: integer
+          format: int64
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [type, message, request_id]
+          properties:
+            type:
+              type: string
+              description: 機械可読なエラー種別(READMEのエラー表参照)
+            message:
+              type: string
+            request_id:
+              type: string
+
+  responses:
+    Error:
+      description: 共通エラー形式
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/XRequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    RetryableError:
+      description: 共通エラー形式 + 再試行ヒント
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/XRequestId"
+        Retry-After:
+          $ref: "#/components/headers/RetryAfter"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"

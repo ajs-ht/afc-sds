@@ -12,7 +12,18 @@ class AppSettingsTest {
 
     private static AppSettings settingsWith(String apiKey, String anthropicApiKey) {
         return new AppSettings(
-                anthropicApiKey, "claude-opus-4-8", apiKey, 32, 50, 24000, 8, 2, false, "INFO", "text");
+                anthropicApiKey,
+                "claude-opus-4-8",
+                apiKey,
+                32,
+                50,
+                24000,
+                8,
+                2,
+                0,
+                false,
+                "INFO",
+                "text");
     }
 
     private static AppSettings settingsWithLimits(
@@ -21,6 +32,22 @@ class AppSettingsTest {
             long maxOutputTokens,
             int maxConcurrentExtractions,
             int anthropicMaxRetries) {
+        return settingsWithLimits(
+                maxUploadMb,
+                maxPdfPages,
+                maxOutputTokens,
+                maxConcurrentExtractions,
+                anthropicMaxRetries,
+                0);
+    }
+
+    private static AppSettings settingsWithLimits(
+            int maxUploadMb,
+            int maxPdfPages,
+            long maxOutputTokens,
+            int maxConcurrentExtractions,
+            int anthropicMaxRetries,
+            long dailyTokenBudget) {
         return new AppSettings(
                 "a",
                 "claude-opus-4-8",
@@ -30,6 +57,7 @@ class AppSettingsTest {
                 maxOutputTokens,
                 maxConcurrentExtractions,
                 anthropicMaxRetries,
+                dailyTokenBudget,
                 false,
                 "INFO",
                 "text");
@@ -79,6 +107,34 @@ class AppSettingsTest {
     void zeroRetriesIsAllowed() {
         // Retries can legitimately be disabled outright.
         assertThatCode(() -> settingsWithLimits(32, 50, 24000, 8, 0)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void negativeDailyTokenBudgetIsRejected() {
+        assertThatIllegalStateException()
+                .isThrownBy(() -> settingsWithLimits(32, 50, 24000, 8, 2, -1))
+                .withMessageContaining("daily-token-budget");
+    }
+
+    @Test
+    void singleApiKeyParsesAsOneKey() {
+        assertThat(settingsWith("only-key", "a").apiKeys()).containsExactly("only-key");
+    }
+
+    @Test
+    void commaSeparatedApiKeysParseIndividually() {
+        // Rotation: old and new keys are accepted simultaneously; whitespace
+        // around the separator and empty segments are tolerated.
+        assertThat(settingsWith("old-key, new-key,", "a").apiKeys())
+                .containsExactly("old-key", "new-key");
+    }
+
+    @Test
+    void apiKeyOfOnlySeparatorsIsRejected() {
+        // "," is not blank, but contains no usable key — same startup failure
+        // as a blank secret.
+        assertThatIllegalStateException().isThrownBy(() -> settingsWith(",", "a"));
+        assertThatIllegalStateException().isThrownBy(() -> settingsWith(" , , ", "a"));
     }
 
     @Test

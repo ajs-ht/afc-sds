@@ -30,11 +30,14 @@ class ExtractionServiceTest {
     private static final byte[] PDF_BYTES = "%PDF-1.4...".getBytes();
 
     /** Scripted {@link ClaudeGateway}: each entry is a ClaudeMessage to return
-     * or a RuntimeException to throw; records the structured flag per call. */
+     * or a RuntimeException to throw; records the structured flag per call and
+     * the feedback passed to correction retries. */
     static class FakeGateway implements ClaudeGateway {
         final Deque<Object> script = new ArrayDeque<>();
         final List<Boolean> structuredCalls = new ArrayList<>();
         final List<byte[]> contents = new ArrayList<>();
+        final List<String> correctionPreviousTexts = new ArrayList<>();
+        final List<String> correctionErrors = new ArrayList<>();
 
         FakeGateway returning(Object... steps) {
             for (Object step : steps) {
@@ -52,6 +55,18 @@ class ExtractionServiceTest {
                 throw e;
             }
             return (ClaudeMessage) next;
+        }
+
+        @Override
+        public ClaudeMessage requestCorrection(
+                byte[] content,
+                String contentType,
+                boolean structured,
+                String previousResponseText,
+                String validationErrors) {
+            correctionPreviousTexts.add(previousResponseText);
+            correctionErrors.add(validationErrors);
+            return requestExtraction(content, contentType, structured);
         }
 
         int callCount() {
@@ -206,6 +221,45 @@ class ExtractionServiceTest {
         assertThat(result.usage().inputTokens()).isEqualTo(2000);
         assertThat(result.usage().outputTokens()).isEqualTo(1000);
         assertThat(result.usage().cacheCreationInputTokens()).isEqualTo(400);
+    }
+
+    @Test
+    void invalidJsonRetryFeedsTheFailureBackForCorrection() {
+        // The retry is a conversational correction: the failed response and
+        // its validation errors go back to the model instead of re-rolling
+        // the same request blind.
+        FakeGateway gateway =
+                new FakeGateway()
+                        .returning(
+                                TestFixtures.fakeMessage("not json at all", "end_turn"),
+                                TestFixtures.fakeMessage(minimalJson(), "end_turn"));
+
+        SdsExtractionResponse result =
+                service(gateway).extractSds(PDF_BYTES, "application/pdf", "req-6c");
+
+        assertThat(result.warnings()).containsExactly("retried_invalid_response");
+        assertThat(gateway.correctionPreviousTexts).containsExactly("not json at all");
+        assertThat(gateway.correctionErrors).hasSize(1);
+        assertThat(gateway.correctionErrors.get(0)).isNotBlank();
+    }
+
+    @Test
+    void retryWithoutUsableTextFallsBackToPlainExtraction() {
+        // A blank response leaves nothing to correct; the retry must be a
+        // plain re-extraction, not a correction with an empty assistant turn
+        // (which the API would reject).
+        FakeGateway gateway =
+                new FakeGateway()
+                        .returning(
+                                TestFixtures.fakeMessage("", "end_turn"),
+                                TestFixtures.fakeMessage(minimalJson(), "end_turn"));
+
+        SdsExtractionResponse result =
+                service(gateway).extractSds(PDF_BYTES, "application/pdf", "req-6g");
+
+        assertThat(result.warnings()).containsExactly("retried_invalid_response");
+        assertThat(gateway.correctionPreviousTexts).isEmpty();
+        assertThat(gateway.callCount()).isEqualTo(2);
     }
 
     @Test
@@ -580,6 +634,25 @@ class ExtractionServiceTest {
         // limiter must release on completion, not leak permits.
         SdsExtractionResponse again = service.extractSds(PDF_BYTES, "application/pdf", "req-17c");
         assertThat(again.data().schemaVersion).isEqualTo("2.1");
+    }
+
+    @Test
+    void dailyTokenBudgetCrossingWarnsButNeverRejects() {
+        // Budget of 1 token: the first request (1500 tokens in the fixture)
+        // crosses it immediately. The crossing is a log-only guardrail —
+        // both it and every later request must still be served in full.
+        FakeGateway gateway =
+                new FakeGateway()
+                        .returning(
+                                TestFixtures.fakeMessage(minimalJson(), "end_turn"),
+                                TestFixtures.fakeMessage(minimalJson(), "end_turn"));
+        ExtractionService service =
+                new ExtractionService(gateway, TestFixtures.settingsWithDailyTokenBudget(1));
+
+        assertThat(service.extractSds(PDF_BYTES, "application/pdf", "req-19a").data().schemaVersion)
+                .isEqualTo("2.1");
+        assertThat(service.extractSds(PDF_BYTES, "application/pdf", "req-19b").data().schemaVersion)
+                .isEqualTo("2.1");
     }
 
     @Test

@@ -21,13 +21,13 @@ public final class TestFixtures {
 
     public static AppSettings settings() {
         return new AppSettings(
-                "k", "claude-opus-4-8", "s", 32, 50, 24000, 8, 2, false, "INFO", "text");
+                "k", "claude-opus-4-8", "s", 32, 50, 24000, 8, 2, 0, false, "INFO", "text");
     }
 
     /** Settings with structured outputs opted in (off by default). */
     public static AppSettings structuredOutputsSettings() {
         return new AppSettings(
-                "k", "claude-opus-4-8", "s", 32, 50, 24000, 8, 2, true, "INFO", "text");
+                "k", "claude-opus-4-8", "s", 32, 50, 24000, 8, 2, 0, true, "INFO", "text");
     }
 
     /** Settings with a specific extraction-concurrency limit. */
@@ -41,6 +41,24 @@ public final class TestFixtures {
                 24000,
                 maxConcurrentExtractions,
                 2,
+                0,
+                false,
+                "INFO",
+                "text");
+    }
+
+    /** Settings with a daily token budget (0 = disabled, the default). */
+    public static AppSettings settingsWithDailyTokenBudget(long dailyTokenBudget) {
+        return new AppSettings(
+                "k",
+                "claude-opus-4-8",
+                "s",
+                32,
+                50,
+                24000,
+                8,
+                2,
+                dailyTokenBudget,
                 false,
                 "INFO",
                 "text");

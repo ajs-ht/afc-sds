@@ -80,6 +80,10 @@ public final class AppExceptions {
         public ClaudeUpstreamException(int statusCode, String message) {
             super(statusCode, "upstream_error", message);
         }
+
+        public ClaudeUpstreamException(int statusCode, String message, Map<String, Object> details) {
+            super(statusCode, "upstream_error", message, details);
+        }
     }
 
     /** Claude's response did not validate against the SDS JSON schema. */

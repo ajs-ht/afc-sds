@@ -1,5 +1,7 @@
 package jp.co.ajs.afcsds.config;
 
+import java.util.Arrays;
+import java.util.List;
 import java.util.Set;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
@@ -21,6 +23,7 @@ public record AppSettings(
         long maxOutputTokens,
         int maxConcurrentExtractions,
         int anthropicMaxRetries,
+        long dailyTokenBudget,
         boolean useStructuredOutputs,
         String logLevel,
         String logFormat) {
@@ -29,8 +32,9 @@ public record AppSettings(
         // A blank (not just unset) secret would otherwise authenticate any
         // request carrying an equally-blank X-API-Key header/value — fail
         // fast at startup instead of silently accepting the misconfiguration.
-        if (apiKey == null || apiKey.isBlank()) {
-            throw new IllegalStateException("afc-sds.api-key must not be blank.");
+        if (apiKey == null || apiKey.isBlank() || parseApiKeys(apiKey).isEmpty()) {
+            throw new IllegalStateException(
+                    "afc-sds.api-key must contain at least one non-blank key.");
         }
         if (anthropicApiKey == null || anthropicApiKey.isBlank()) {
             throw new IllegalStateException("afc-sds.anthropic-api-key must not be blank.");
@@ -45,6 +49,22 @@ public record AppSettings(
         if (anthropicMaxRetries < 0) {
             throw new IllegalStateException("afc-sds.anthropic-max-retries must not be negative.");
         }
+        if (dailyTokenBudget < 0) {
+            throw new IllegalStateException("afc-sds.daily-token-budget must not be negative.");
+        }
+    }
+
+    private static List<String> parseApiKeys(String raw) {
+        return Arrays.stream(raw.split(",")).map(String::trim).filter(s -> !s.isEmpty()).toList();
+    }
+
+    /**
+     * API_KEY parsed as comma-separated shared secrets. Normally one; during
+     * a rotation, old and new keys are listed together so clients can migrate
+     * without downtime.
+     */
+    public List<String> apiKeys() {
+        return parseApiKeys(apiKey);
     }
 
     private static void requirePositive(String name, long value) {

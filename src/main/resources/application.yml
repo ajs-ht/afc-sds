@@ -30,6 +30,7 @@ afc-sds:
   max-output-tokens: ${MAX_OUTPUT_TOKENS:24000}
   max-concurrent-extractions: ${MAX_CONCURRENT_EXTRACTIONS:8}
   anthropic-max-retries: ${ANTHROPIC_MAX_RETRIES:2}
+  daily-token-budget: ${DAILY_TOKEN_BUDGET:0}
   use-structured-outputs: ${USE_STRUCTURED_OUTPUTS:false}
   log-level: ${LOG_LEVEL:INFO}
   log-format: ${LOG_FORMAT:text}

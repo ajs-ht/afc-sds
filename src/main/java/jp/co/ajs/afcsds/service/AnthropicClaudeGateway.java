@@ -77,7 +77,30 @@ public class AnthropicClaudeGateway implements ClaudeGateway {
 
     @Override
     public ClaudeMessage requestExtraction(byte[] content, String contentType, boolean structured) {
-        MessageCreateParams params = buildParams(content, contentType, structured);
+        return execute(paramsBuilder(content, contentType, structured).build());
+    }
+
+    @Override
+    public ClaudeMessage requestCorrection(
+            byte[] content,
+            String contentType,
+            boolean structured,
+            String previousResponseText,
+            String validationErrors) {
+        // Same request as the initial extraction (same cached system prompt),
+        // continued as a conversation: the failed response comes back as an
+        // assistant turn, then a user turn names the validation errors and
+        // asks for a full corrected re-output.
+        MessageCreateParams params =
+                paramsBuilder(content, contentType, structured)
+                        .addAssistantMessage(previousResponseText)
+                        .addUserMessage(
+                                Prompts.CORRECTION_INSTRUCTION_TEMPLATE.formatted(validationErrors))
+                        .build();
+        return execute(params);
+    }
+
+    private ClaudeMessage execute(MessageCreateParams params) {
         Message message;
         try {
             message = streamFinalMessage(params);
@@ -106,7 +129,8 @@ public class AnthropicClaudeGateway implements ClaudeGateway {
         }
     }
 
-    private MessageCreateParams buildParams(byte[] content, String contentType, boolean structured) {
+    private MessageCreateParams.Builder paramsBuilder(
+            byte[] content, String contentType, boolean structured) {
         String systemPrompt =
                 structured ? Prompts.SYSTEM_PROMPT_BASE : Prompts.SYSTEM_PROMPT_WITH_SCHEMA;
 
@@ -136,7 +160,7 @@ public class AnthropicClaudeGateway implements ClaudeGateway {
                             .build());
         }
 
-        return builder.build();
+        return builder;
     }
 
     // The SDS schema is immutable, so its SDK representation is converted once

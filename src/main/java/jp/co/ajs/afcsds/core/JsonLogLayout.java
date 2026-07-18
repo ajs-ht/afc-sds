@@ -25,6 +25,12 @@ public class JsonLogLayout extends LayoutBase<ILoggingEvent> {
         entry.put("time", TIME_FORMAT.format(Instant.ofEpochMilli(event.getTimeStamp())));
         entry.put("level", event.getLevel().toString());
         entry.put("logger", event.getLoggerName());
+        // Set by RequestIdFilter for every in-request log line, so pipelines
+        // can filter by request without parsing it out of the message text.
+        String requestId = event.getMDCPropertyMap().get("request_id");
+        if (requestId != null) {
+            entry.put("request_id", requestId);
+        }
         entry.put("message", event.getFormattedMessage());
         IThrowableProxy throwable = event.getThrowableProxy();
         if (throwable != null) {

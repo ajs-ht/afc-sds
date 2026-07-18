@@ -78,10 +78,15 @@ public class ExtractionService {
     // server_busy (503 + Retry-After) instead of queueing.
     private final Semaphore extractionSlots;
 
+    // Daily token totals for the DAILY_TOKEN_BUDGET cost warning.
+    private final DailyTokenBudget dailyTokenBudget;
+
     public ExtractionService(ClaudeGateway gateway, AppSettings settings) {
         this.gateway = gateway;
         this.settings = settings;
         this.extractionSlots = new Semaphore(settings.maxConcurrentExtractions());
+        this.dailyTokenBudget =
+                new DailyTokenBudget(settings.dailyTokenBudget(), java.time.Clock.systemUTC());
     }
 
     /**
@@ -91,8 +96,12 @@ public class ExtractionService {
      * truncated by max_tokens) is retried once before surfacing
      * {@code extraction_invalid_response} — on the prompt-embedded-schema
      * path nothing constrains decoding, so a one-off malformed response is
-     * recoverable. The returned usage covers all API calls made for the
-     * request.
+     * recoverable. The retry feeds the failed response and its validation
+     * errors back to the model as conversation turns (see
+     * {@link ClaudeGateway#requestCorrection}) so it can fix its own output
+     * instead of re-rolling blind; a response with no usable text falls back
+     * to a plain re-extraction. The returned usage covers all API calls made
+     * for the request.
      */
     public SdsExtractionResponse extractSds(byte[] content, String contentType, String requestId) {
         if (!extractionSlots.tryAcquire()) {
@@ -110,24 +119,32 @@ public class ExtractionService {
     private SdsExtractionResponse doExtract(byte[] content, String contentType, String requestId) {
         boolean structured = settings.useStructuredOutputs() && !grammarTooLarge.get();
 
-        RequestResult result = requestExtraction(content, contentType, structured, requestId);
+        RequestResult result =
+                performRequest(
+                        s -> gateway.requestExtraction(content, contentType, s),
+                        structured,
+                        requestId);
         ClaudeMessage message = result.message();
         structured = result.structured();
 
         List<ClaudeMessage> apiMessages = new ArrayList<>();
         apiMessages.add(message);
 
-        SdsDocument parsed = parseDocument(message, false);
+        ParseOutcome outcome = tryParse(message, false);
+        SdsDocument parsed = outcome.document();
         boolean retried = parsed == null;
 
         if (parsed == null) {
             logger.warn(
-                    "response failed SDS schema validation; retrying once (request_id={})", requestId);
-            result = requestExtraction(content, contentType, structured, requestId);
+                    "response failed SDS schema validation; retrying once with the errors fed "
+                            + "back (request_id={}): {}",
+                    requestId,
+                    clip(outcome.error(), 500));
+            result = performRequest(correctionCall(content, contentType, message, outcome), structured, requestId);
             message = result.message();
             structured = result.structured();
             apiMessages.add(message);
-            parsed = parseDocument(message, true);
+            parsed = tryParse(message, true).document();
         }
 
         List<String> warnings = new ArrayList<>();
@@ -148,10 +165,41 @@ public class ExtractionService {
         }
         warnings.addAll(PostValidation.collectDomainWarnings(parsed));
 
-        return new SdsExtractionResponse(parsed, warnings, message.model(), sumUsage(apiMessages));
+        ExtractionUsage usage = sumUsage(apiMessages);
+        if (dailyTokenBudget.record(usage.inputTokens() + usage.outputTokens())) {
+            logger.warn(
+                    "daily token usage {} exceeded DAILY_TOKEN_BUDGET={} (UTC day); requests "
+                            + "continue to be served — check for runaway callers (request_id={})",
+                    dailyTokenBudget.usedToday(),
+                    settings.dailyTokenBudget(),
+                    requestId);
+        }
+
+        return new SdsExtractionResponse(parsed, warnings, message.model(), usage);
     }
 
     private record RequestResult(ClaudeMessage message, boolean structured) {}
+
+    /** One gateway invocation, parameterized only by the structured flag. */
+    @FunctionalInterface
+    private interface GatewayCall {
+        ClaudeMessage call(boolean structured);
+    }
+
+    /**
+     * The retry call after a validation failure: feed the failed response and
+     * its errors back for correction, or — when the response had no usable
+     * text to correct — fall back to a plain re-extraction.
+     */
+    private GatewayCall correctionCall(
+            byte[] content, String contentType, ClaudeMessage failed, ParseOutcome outcome) {
+        String previousText = failed.text();
+        if (previousText == null || previousText.isBlank()) {
+            return s -> gateway.requestExtraction(content, contentType, s);
+        }
+        String errors = clip(outcome.error(), MAX_FEEDBACK_ERROR_CHARS);
+        return s -> gateway.requestCorrection(content, contentType, s, previousText, errors);
+    }
 
     /**
      * One Claude call: grammar-size fallback, exception mapping, usage log.
@@ -162,11 +210,10 @@ public class ExtractionService {
      * call, so a document rejection surfacing on the fallback attempt still
      * becomes {@code invalid_document} rather than a generic upstream error.
      */
-    private RequestResult requestExtraction(
-            byte[] content, String contentType, boolean structured, String requestId) {
+    private RequestResult performRequest(GatewayCall call, boolean structured, String requestId) {
         ClaudeMessage message;
         try {
-            message = gateway.requestExtraction(content, contentType, structured);
+            message = call.call(structured);
         } catch (ClaudeApiException exc) {
             if (!(structured && isGrammarSizeError(exc))) {
                 throw mapApiException(exc);
@@ -180,7 +227,7 @@ public class ExtractionService {
                     requestId,
                     exc.getMessage());
             try {
-                message = gateway.requestExtraction(content, contentType, false);
+                message = call.call(false);
             } catch (ClaudeApiException retryExc) {
                 throw mapApiException(retryExc);
             }
@@ -227,7 +274,14 @@ public class ExtractionService {
                     "Anthropic rejected the document as invalid: " + exc.getMessage());
         }
         return switch (exc.kind()) {
-            case RATE_LIMIT -> new ClaudeUpstreamException(503, "Rate limited by the Anthropic API.");
+            case RATE_LIMIT ->
+                    // retry_after_seconds surfaces as a Retry-After header (see
+                    // GlobalExceptionHandler) so callers back off instead of
+                    // hammering an already rate-limited upstream.
+                    new ClaudeUpstreamException(
+                            503,
+                            "Rate limited by the Anthropic API.",
+                            Map.of("retry_after_seconds", 30));
             case CONNECTION -> new ClaudeUpstreamException(503, "Could not reach the Anthropic API.");
             case SERVER_ERROR ->
                     new ClaudeUpstreamException(503, "The Anthropic API returned a server error.");
@@ -240,15 +294,22 @@ public class ExtractionService {
         };
     }
 
+    /** Either a validated document, or the validation error that stopped it. */
+    private record ParseOutcome(SdsDocument document, String error) {}
+
+    // Cap on the validation-error text fed back to the model on retry: enough
+    // to name every broken field without ballooning the request.
+    private static final int MAX_FEEDBACK_ERROR_CHARS = 4000;
+
     /**
      * Validate a message's text as an SdsDocument.
      *
-     * <p>A validation failure on a non-truncated response returns {@code null}
-     * so the caller can retry once; with {@code finalAttempt=true} it throws
-     * instead. Truncation always throws — retrying the same document would
-     * just truncate again.
+     * <p>A validation failure on a non-truncated response returns the error
+     * text so the caller can retry once with it fed back to the model; with
+     * {@code finalAttempt=true} it throws instead. Truncation always throws —
+     * retrying the same document would just truncate again.
      */
-    private static SdsDocument parseDocument(ClaudeMessage message, boolean finalAttempt) {
+    private static ParseOutcome tryParse(ClaudeMessage message, boolean finalAttempt) {
         String text = stripCodeFence(extractTextBlock(message));
         try {
             JsonNode node = SdsSchema.STRICT_MAPPER.readTree(text);
@@ -260,7 +321,8 @@ public class ExtractionService {
                 throw new IllegalArgumentException(
                         errors.stream().map(ValidationMessage::toString).collect(Collectors.joining("; ")));
             }
-            return SdsSchema.STRICT_MAPPER.treeToValue(node, SdsDocument.class);
+            return new ParseOutcome(
+                    SdsSchema.STRICT_MAPPER.treeToValue(node, SdsDocument.class), null);
         } catch (JacksonException | IllegalArgumentException exc) {
             if ("max_tokens".equals(message.stopReason())) {
                 throw new ClaudeTruncatedException(
@@ -272,8 +334,15 @@ public class ExtractionService {
                                 + "(even after one retry): "
                                 + exc.getMessage());
             }
-            return null;
+            return new ParseOutcome(null, String.valueOf(exc.getMessage()));
         }
+    }
+
+    private static String clip(String value, int maxChars) {
+        if (value == null) {
+            return "";
+        }
+        return value.length() <= maxChars ? value : value.substring(0, maxChars) + "…";
     }
 
     private static ExtractionUsage sumUsage(List<ClaudeMessage> messages) {

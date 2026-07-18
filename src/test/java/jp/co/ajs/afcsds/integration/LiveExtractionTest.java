@@ -35,6 +35,7 @@ class LiveExtractionTest {
                         24000,
                         8,
                         2,
+                        0,
                         Boolean.parseBoolean(
                                 System.getenv().getOrDefault("USE_STRUCTURED_OUTPUTS", "false")),
                         "INFO",
