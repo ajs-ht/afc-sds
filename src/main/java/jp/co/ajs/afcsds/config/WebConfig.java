@@ -29,14 +29,15 @@ public class WebConfig implements WebMvcConfigurer {
      * multipart framing, so our own validation (with its canonical
      * file_too_large error body) is what callers normally see. Anything so
      * large it trips this cap instead is mapped to the same error type in
-     * GlobalExceptionHandler.
+     * GlobalExceptionHandler. The request-level cap is the same
+     * {@link AppSettings#maxRequestBytes()} used by the Content-Length
+     * pre-check, so the two limits can't drift apart.
      */
     @Bean
     public MultipartConfigElement multipartConfigElement(AppSettings settings) {
         MultipartConfigFactory factory = new MultipartConfigFactory();
         factory.setMaxFileSize(DataSize.ofBytes(settings.maxUploadBytes() + DataSize.ofMegabytes(1).toBytes()));
-        factory.setMaxRequestSize(
-                DataSize.ofBytes(settings.maxUploadBytes() + DataSize.ofMegabytes(2).toBytes()));
+        factory.setMaxRequestSize(DataSize.ofBytes(settings.maxRequestBytes()));
         return factory.createMultipartConfig();
     }
 }

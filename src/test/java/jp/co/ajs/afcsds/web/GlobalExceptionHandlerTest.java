@@ -2,6 +2,8 @@ package jp.co.ajs.afcsds.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import jp.co.ajs.afcsds.core.AppExceptions.ServerBusyException;
+import jp.co.ajs.afcsds.core.AppExceptions.UnauthorizedException;
 import jp.co.ajs.afcsds.schema.Responses.ErrorResponse;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.ResponseEntity;
@@ -34,5 +36,28 @@ class GlobalExceptionHandlerTest {
         assertThat(response.getStatusCode().value()).isEqualTo(400);
         assertThat(response.getBody().error().type()).isEqualTo("file_too_large");
         assertThat(response.getBody().error().requestId()).isEqualTo("req-cap");
+    }
+
+    @Test
+    void serverBusyCarriesRetryAfterHeader() {
+        ResponseEntity<ErrorResponse> response =
+                new GlobalExceptionHandler()
+                        .handleAppException(
+                                new ServerBusyException("all slots busy"), requestWithId("req-busy"));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(503);
+        assertThat(response.getBody().error().type()).isEqualTo("server_busy");
+        assertThat(response.getHeaders().getFirst("Retry-After"))
+                .isEqualTo(String.valueOf(ServerBusyException.RETRY_AFTER_SECONDS));
+    }
+
+    @Test
+    void errorsWithoutRetryDetailHaveNoRetryAfterHeader() {
+        ResponseEntity<ErrorResponse> response =
+                new GlobalExceptionHandler()
+                        .handleAppException(
+                                new UnauthorizedException("bad key"), requestWithId("req-auth"));
+
+        assertThat(response.getHeaders().getFirst("Retry-After")).isNull();
     }
 }

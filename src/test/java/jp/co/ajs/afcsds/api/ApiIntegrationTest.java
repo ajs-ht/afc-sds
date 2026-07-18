@@ -52,6 +52,12 @@ class ApiIntegrationTest {
     private void gatewayReturns(String text, String stopReason) {
         when(claudeGateway.requestExtraction(any(), anyString(), anyBoolean()))
                 .thenReturn(TestFixtures.fakeMessage(text, stopReason));
+        // The schema-validation retry goes through requestCorrection (the
+        // mock does not inherit the interface's default method) — have it
+        // return the same scripted response.
+        when(claudeGateway.requestCorrection(
+                        any(), anyString(), anyBoolean(), anyString(), anyString()))
+                .thenReturn(TestFixtures.fakeMessage(text, stopReason));
     }
 
     // --- auth ---------------------------------------------------------------
@@ -88,6 +94,26 @@ class ApiIntegrationTest {
                         .andReturn();
         // Must be a well-formed UUID so clients can rely on the format.
         UUID.fromString(result.getResponse().getHeader("X-Request-ID"));
+    }
+
+    @Test
+    void clientSuppliedRequestIdIsHonored() throws Exception {
+        // A caller's own correlation id (safe charset) is echoed back and
+        // used in logs, so cross-system correlation works end to end.
+        mockMvc.perform(get("/healthz").header("X-Request-ID", "client-corr_id.123"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("X-Request-ID", "client-corr_id.123"));
+    }
+
+    @Test
+    void unsafeClientRequestIdIsReplacedWithAUuid() throws Exception {
+        MvcResult result =
+                mockMvc.perform(get("/healthz").header("X-Request-ID", "bad id \nwith newline"))
+                        .andExpect(status().isOk())
+                        .andReturn();
+        String assigned = result.getResponse().getHeader("X-Request-ID");
+        assertThat(assigned).isNotEqualTo("bad id \nwith newline");
+        UUID.fromString(assigned);
     }
 
     @Test

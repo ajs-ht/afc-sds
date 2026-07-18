@@ -190,6 +190,34 @@ class AnthropicClaudeGatewayTest {
         assertThat(format.schema()._additionalProperties()).containsKey("properties");
     }
 
+    @Test
+    void correctionRequestReplaysTheFailureAsConversationTurns() {
+        stubResponse(sdkMessage("{}", StopReason.END_TURN, null));
+
+        gateway.requestCorrection(
+                PDF_BYTES,
+                "application/pdf",
+                false,
+                "{\"broken\": true}",
+                "required property section_4_first_aid is missing");
+
+        MessageCreateParams params = capturedParams();
+        // Same cached system prompt as the initial extraction — the retry
+        // must not fork a new prompt variant.
+        List<TextBlockParam> system = params.system().orElseThrow().asTextBlockParams();
+        assertThat(system.get(0).text()).isEqualTo(Prompts.SYSTEM_PROMPT_WITH_SCHEMA);
+
+        // Conversation: [user: doc+instruction, assistant: failed response,
+        // user: correction instruction naming the validation errors].
+        assertThat(params.messages()).hasSize(3);
+        assertThat(params.messages().get(0).content().asBlockParams()).hasSize(2);
+        assertThat(params.messages().get(1).role().toString()).isEqualTo("assistant");
+        assertThat(params.messages().get(1).content().asString()).isEqualTo("{\"broken\": true}");
+        assertThat(params.messages().get(2).role().toString()).isEqualTo("user");
+        assertThat(params.messages().get(2).content().asString())
+                .contains("required property section_4_first_aid is missing");
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"image/png", "image/jpeg", "image/webp"})
     void imageRequestBuildsBase64ImageBlock(String contentType) {

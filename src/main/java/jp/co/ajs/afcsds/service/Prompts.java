@@ -99,4 +99,23 @@ public final class Prompts {
     public static final String USER_INSTRUCTION =
             "添付のSDS文書を読み取り、JIS Z 7253の16項目構成に沿った構造化JSONとして"
                     + "抽出してください。";
+
+    /**
+     * Follow-up user turn for the schema-validation retry: the failed
+     * response is replayed as an assistant turn, then this message (with the
+     * validation errors interpolated via {@code formatted}) asks for a full
+     * corrected re-output. Per-request variation here is fine — only the
+     * system prompt must stay byte-stable for prompt caching.
+     */
+    public static final String CORRECTION_INSTRUCTION_TEMPLATE =
+            """
+            直前のあなたの出力は、次の検証エラーによりJSON Schema検証に失敗しました:
+
+            %s
+
+            同じSDS文書について、これらのエラーをすべて解消した完全なJSONオブジェクトを
+            最初から出力し直してください。修正箇所の差分ではなく文書全体を出力してください。
+            スキーマにないフィールドの追加、前置き・説明文・```のようなコードブロック記法は
+            引き続き禁止です。
+            """;
 }

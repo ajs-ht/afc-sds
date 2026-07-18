@@ -1,0 +1,51 @@
+# Weekly drift check against the real Anthropic API. Catches externally-caused
+# breakage between deploys: model deprecations, API behavior changes, and —
+# via USE_STRUCTURED_OUTPUTS=true — whether the compiled-grammar size limit
+# still rejects the SDS schema (LiveExtractionTest fails loudly on the
+# structured_outputs_unavailable fallback, signalling the limit was NOT yet
+# raised; once Anthropic raises it, the run turns green and
+# USE_STRUCTURED_OUTPUTS can be enabled in production).
+#
+# Requires the ANTHROPIC_API_KEY repository secret; skips silently when it is
+# not configured, so forks aren't broken. Costs one real extraction per run.
+name: Live API check
+
+on:
+  schedule:
+    - cron: "0 21 * * 0" # 06:00 JST Monday
+  workflow_dispatch:
+
+jobs:
+  live-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for API key secret
+        id: key
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "ANTHROPIC_API_KEY secret is not configured; skipping." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/setup-java@v4
+        if: steps.key.outputs.present == 'true'
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Run live extraction test (structured-outputs probe)
+        if: steps.key.outputs.present == 'true'
+        env:
+          RUN_INTEGRATION: "1"
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          USE_STRUCTURED_OUTPUTS: "true"
+        # Single test: the JaCoCo coverage gate only makes sense for the full
+        # suite, so it is skipped here.
+        run: mvn -B test -Dtest=LiveExtractionTest -Djacoco.skip=true

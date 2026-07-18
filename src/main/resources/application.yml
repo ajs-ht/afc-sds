@@ -3,10 +3,17 @@
 # only maps them onto typed AppSettings properties and sets server basics.
 server:
   port: 8000
+  # Finish in-flight extractions (already-paid Claude calls, minutes long)
+  # before exiting on SIGTERM instead of cutting them off.
+  shutdown: graceful
 
 spring:
   application:
     name: afc-sds
+  lifecycle:
+    # How long a graceful shutdown waits for in-flight requests. Sized to the
+    # worst-case single extraction rather than the 30s default.
+    timeout-per-shutdown-phase: 5m
   # Multipart size limits are enforced by our own validation logic
   # (file_too_large with a consistent error body); the servlet-level limit is
   # configured programmatically from MAX_UPLOAD_MB in WebConfig.
@@ -21,6 +28,9 @@ afc-sds:
   max-upload-mb: ${MAX_UPLOAD_MB:32}
   max-pdf-pages: ${MAX_PDF_PAGES:50}
   max-output-tokens: ${MAX_OUTPUT_TOKENS:24000}
+  max-concurrent-extractions: ${MAX_CONCURRENT_EXTRACTIONS:8}
+  anthropic-max-retries: ${ANTHROPIC_MAX_RETRIES:2}
+  daily-token-budget: ${DAILY_TOKEN_BUDGET:0}
   use-structured-outputs: ${USE_STRUCTURED_OUTPUTS:false}
   log-level: ${LOG_LEVEL:INFO}
   log-format: ${LOG_FORMAT:text}

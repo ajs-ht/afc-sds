@@ -22,3 +22,13 @@ jobs:
 
       - name: Run unit tests with coverage gate
         run: mvn -B test
+
+  # The Dockerfile has its own build pipeline (multi-stage Maven build);
+  # verify it here so image breakage is caught at PR time, not at deploy.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t afc-sds:ci .
