@@ -23,6 +23,18 @@ public record AppSettings(
         String logLevel,
         String logFormat) {
 
+    public AppSettings {
+        // A blank (not just unset) secret would otherwise authenticate any
+        // request carrying an equally-blank X-API-Key header/value — fail
+        // fast at startup instead of silently accepting the misconfiguration.
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new IllegalStateException("afc-sds.api-key must not be blank.");
+        }
+        if (anthropicApiKey == null || anthropicApiKey.isBlank()) {
+            throw new IllegalStateException("afc-sds.anthropic-api-key must not be blank.");
+        }
+    }
+
     public static final Set<String> ALLOWED_MIME_TYPES =
             Set.of("application/pdf", "image/png", "image/jpeg", "image/webp");
 

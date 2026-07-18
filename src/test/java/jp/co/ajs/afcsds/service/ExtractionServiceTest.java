@@ -444,4 +444,24 @@ class ExtractionServiceTest {
                 .isThrownBy(() -> service(gateway).extractSds(PDF_BYTES, "application/pdf", "req-7b"))
                 .satisfies(exc -> assertThat(exc.statusCode()).isEqualTo(400));
     }
+
+    @Test
+    void badRequestOnGrammarFallbackCallMapsToInvalidDocumentError() {
+        // The grammar-size 400 on the first call triggers the fallback retry
+        // (without structured outputs); if THAT call also gets rejected as an
+        // unprocessable document, it must still surface as invalid_document
+        // (400), not fall through to a generic upstream error (500).
+        FakeGateway gateway =
+                new FakeGateway()
+                        .returning(
+                                grammarTooLargeError(),
+                                apiError(ClaudeApiException.Kind.BAD_REQUEST, "document rejected"));
+
+        assertThatExceptionOfType(ClaudeInvalidDocumentException.class)
+                .isThrownBy(
+                        () -> structuredService(gateway).extractSds(PDF_BYTES, "application/pdf", "req-16"))
+                .satisfies(exc -> assertThat(exc.statusCode()).isEqualTo(400));
+
+        assertThat(gateway.structuredCalls).containsExactly(true, false);
+    }
 }

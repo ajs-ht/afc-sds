@@ -6,6 +6,7 @@ import com.networknt.schema.ValidationMessage;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -137,49 +138,33 @@ public class ExtractionService {
      * One Claude call: grammar-size fallback, exception mapping, usage log.
      *
      * <p>The returned {@code structured} flips to false when the call fell
-     * back to the prompt-embedded schema mid-flight.
+     * back to the prompt-embedded schema mid-flight. The fallback call is
+     * mapped through the same {@link #mapApiException} logic as the initial
+     * call, so a document rejection surfacing on the fallback attempt still
+     * becomes {@code invalid_document} rather than a generic upstream error.
      */
     private RequestResult requestExtraction(
             byte[] content, String contentType, boolean structured, String requestId) {
         ClaudeMessage message;
         try {
-            try {
-                message = gateway.requestExtraction(content, contentType, structured);
-            } catch (ClaudeApiException exc) {
-                if (exc.kind() != ClaudeApiException.Kind.BAD_REQUEST) {
-                    throw exc;
-                }
-                if (!(structured && isGrammarSizeError(exc))) {
-                    // Not a grammar-size fallback case: the document/request
-                    // itself was rejected, which is the caller's fault, not a
-                    // server error.
-                    throw new ClaudeInvalidDocumentException(
-                            "Anthropic rejected the document as invalid: " + exc.getMessage());
-                }
-                GRAMMAR_TOO_LARGE.set(true);
-                structured = false;
-                logger.warn(
-                        "structured-outputs grammar exceeded the API size limit; falling back to "
-                                + "the prompt-embedded schema for this and subsequent requests "
-                                + "(request_id={}): {}",
-                        requestId,
-                        exc.getMessage());
-                message = gateway.requestExtraction(content, contentType, false);
-            }
+            message = gateway.requestExtraction(content, contentType, structured);
         } catch (ClaudeApiException exc) {
-            throw switch (exc.kind()) {
-                case RATE_LIMIT -> new ClaudeUpstreamException(503, "Rate limited by the Anthropic API.");
-                case CONNECTION -> new ClaudeUpstreamException(503, "Could not reach the Anthropic API.");
-                case SERVER_ERROR ->
-                        new ClaudeUpstreamException(503, "The Anthropic API returned a server error.");
-                case CONFIG ->
-                        new ClaudeUpstreamException(
-                                500,
-                                "Anthropic API request was rejected due to a server-side configuration issue.");
-                default ->
-                        new ClaudeUpstreamException(
-                                500, "Unexpected Anthropic API error: " + exc.getMessage());
-            };
+            if (!(structured && isGrammarSizeError(exc))) {
+                throw mapApiException(exc);
+            }
+            GRAMMAR_TOO_LARGE.set(true);
+            structured = false;
+            logger.warn(
+                    "structured-outputs grammar exceeded the API size limit; falling back to "
+                            + "the prompt-embedded schema for this and subsequent requests "
+                            + "(request_id={}): {}",
+                    requestId,
+                    exc.getMessage());
+            try {
+                message = gateway.requestExtraction(content, contentType, false);
+            } catch (ClaudeApiException retryExc) {
+                throw mapApiException(retryExc);
+            }
         }
 
         ClaudeMessage.Usage usage = message.usage();
@@ -202,9 +187,38 @@ public class ExtractionService {
     }
 
     private static boolean isGrammarSizeError(ClaudeApiException exc) {
-        String message = exc.getMessage() == null ? "" : exc.getMessage().toLowerCase();
+        if (exc.kind() != ClaudeApiException.Kind.BAD_REQUEST) {
+            return false;
+        }
+        String message = exc.getMessage() == null ? "" : exc.getMessage().toLowerCase(Locale.ROOT);
         return message.contains("grammar")
                 && (message.contains("too large") || message.contains("too complex"));
+    }
+
+    /**
+     * Map a gateway failure to the AppException the caller should see: a
+     * {@code BAD_REQUEST} means Anthropic rejected the document/request
+     * itself (the caller's fault), anything else is an upstream failure.
+     * Shared by both the initial call and the grammar-size fallback call so
+     * either one is classified the same way.
+     */
+    private static RuntimeException mapApiException(ClaudeApiException exc) {
+        if (exc.kind() == ClaudeApiException.Kind.BAD_REQUEST) {
+            return new ClaudeInvalidDocumentException(
+                    "Anthropic rejected the document as invalid: " + exc.getMessage());
+        }
+        return switch (exc.kind()) {
+            case RATE_LIMIT -> new ClaudeUpstreamException(503, "Rate limited by the Anthropic API.");
+            case CONNECTION -> new ClaudeUpstreamException(503, "Could not reach the Anthropic API.");
+            case SERVER_ERROR ->
+                    new ClaudeUpstreamException(503, "The Anthropic API returned a server error.");
+            case CONFIG ->
+                    new ClaudeUpstreamException(
+                            500,
+                            "Anthropic API request was rejected due to a server-side configuration issue.");
+            default ->
+                    new ClaudeUpstreamException(500, "Unexpected Anthropic API error: " + exc.getMessage());
+        };
     }
 
     /**
