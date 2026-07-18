@@ -1,0 +1,26 @@
+# Runtime configuration. Environment variables are the public configuration
+# surface (same names as the Python version — see .env.example); this file
+# only maps them onto typed AppSettings properties and sets server basics.
+server:
+  port: 8000
+
+spring:
+  application:
+    name: afc-sds
+  # Multipart size limits are enforced by our own validation logic
+  # (file_too_large with a consistent error body); the servlet-level limit is
+  # configured programmatically from MAX_UPLOAD_MB in WebConfig.
+
+afc-sds:
+  # Required — startup fails if these are not set (no defaults, matching the
+  # Python Settings model).
+  anthropic-api-key: ${ANTHROPIC_API_KEY}
+  api-key: ${API_KEY}
+
+  model-id: ${MODEL_ID:claude-opus-4-8}
+  max-upload-mb: ${MAX_UPLOAD_MB:32}
+  max-pdf-pages: ${MAX_PDF_PAGES:50}
+  max-output-tokens: ${MAX_OUTPUT_TOKENS:24000}
+  use-structured-outputs: ${USE_STRUCTURED_OUTPUTS:false}
+  log-level: ${LOG_LEVEL:INFO}
+  log-format: ${LOG_FORMAT:text}

@@ -1,10 +1,8 @@
 .git
+.github
 .gitignore
+target
 .env
-.venv
-venv
-__pycache__
-*.pyc
-.pytest_cache
-tests
-README.md
+*.md
+.idea
+*.iml

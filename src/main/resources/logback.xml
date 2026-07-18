@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Logging setup mirroring the Python configure_logging():
+     - LOG_LEVEL controls the root level (default INFO)
+     - LOG_FORMAT=json switches every log line to a single JSON object
+       (see JsonLogLayout); default is human-readable text.
+     The <if> must sit at the top level: logback 1.5 does not support
+     conditionals nested inside an <appender> element. -->
+<configuration>
+  <variable name="LOG_LEVEL" value="${LOG_LEVEL:-INFO}"/>
+  <variable name="LOG_FORMAT" value="${LOG_FORMAT:-text}"/>
+
+  <if condition='property("LOG_FORMAT").equalsIgnoreCase("json")'>
+    <then>
+      <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="ch.qos.logback.core.encoder.LayoutWrappingEncoder">
+          <layout class="jp.co.ajs.afcsds.core.JsonLogLayout"/>
+        </encoder>
+      </appender>
+    </then>
+    <else>
+      <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+          <pattern>%d{yyyy-MM-dd'T'HH:mm:ssZ} %level %logger: %msg%n%ex</pattern>
+        </encoder>
+      </appender>
+    </else>
+  </if>
+
+  <root level="${LOG_LEVEL}">
+    <appender-ref ref="STDOUT"/>
+  </root>
+</configuration>
