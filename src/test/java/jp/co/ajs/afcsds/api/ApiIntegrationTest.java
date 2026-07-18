@@ -6,6 +6,8 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.times;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -97,6 +99,22 @@ class ApiIntegrationTest {
         JsonNode body = TestFixtures.MAPPER.readTree(result.getResponse().getContentAsString());
         assertThat(body.get("error").get("request_id").asText())
                 .isEqualTo(result.getResponse().getHeader("X-Request-ID"));
+    }
+
+    // --- framework-level errors keep the shared error body -------------------
+
+    @Test
+    void unknownPathReturns404NotFound() throws Exception {
+        mockMvc.perform(get("/nonexistent"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.type").value("not_found"));
+    }
+
+    @Test
+    void unsupportedMethodReturns405() throws Exception {
+        mockMvc.perform(delete("/healthz"))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(jsonPath("$.error.type").value("method_not_allowed"));
     }
 
     // --- schema endpoint ----------------------------------------------------
@@ -227,6 +245,53 @@ class ApiIntegrationTest {
         ArgumentCaptor<byte[]> sentPdf = ArgumentCaptor.forClass(byte[].class);
         verify(claudeGateway).requestExtraction(sentPdf.capture(), anyString(), anyBoolean());
         assertThat(TestFixtures.pdfPageCount(sentPdf.getValue())).isEqualTo(6);
+    }
+
+    @Test
+    void multiSdsFlowExtractsFirstThenSelectedPages() throws Exception {
+        // The documented caller flow for a multi-SDS PDF, end to end: the
+        // first extraction reports the further document with its page range,
+        // and re-posting the same file with `pages` sends only those pages.
+        ObjectNode first = TestFixtures.minimalSdsPayload();
+        first.set(
+                "additional_documents",
+                TestFixtures.MAPPER
+                        .createArrayNode()
+                        .add(
+                                TestFixtures.MAPPER
+                                        .createObjectNode()
+                                        .put("product_name", "テスト洗浄剤B")
+                                        .put("start_page", 6)
+                                        .put("end_page", 11)));
+        when(claudeGateway.requestExtraction(any(), anyString(), anyBoolean()))
+                .thenReturn(
+                        TestFixtures.fakeMessage(first.toString(), "end_turn"),
+                        TestFixtures.fakeMessage(
+                                TestFixtures.minimalSdsPayload().toString(), "end_turn"));
+
+        MockMultipartFile multiSds =
+                new MockMultipartFile(
+                        "file", "multi_sds.pdf", "application/pdf", TestFixtures.pdfWithPages(11));
+
+        mockMvc.perform(multipart("/v1/sds/extract").file(multiSds).header("X-API-Key", API_KEY))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.warnings[0]").value("additional_sds_documents_detected"))
+                .andExpect(jsonPath("$.data.additional_documents[0].start_page").value(6))
+                .andExpect(jsonPath("$.data.additional_documents[0].end_page").value(11));
+
+        mockMvc.perform(
+                        multipart("/v1/sds/extract")
+                                .file(multiSds)
+                                .param("pages", "6-11")
+                                .header("X-API-Key", API_KEY))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.warnings").isEmpty());
+
+        ArgumentCaptor<byte[]> sentPdf = ArgumentCaptor.forClass(byte[].class);
+        verify(claudeGateway, times(2))
+                .requestExtraction(sentPdf.capture(), anyString(), anyBoolean());
+        assertThat(TestFixtures.pdfPageCount(sentPdf.getAllValues().get(0))).isEqualTo(11);
+        assertThat(TestFixtures.pdfPageCount(sentPdf.getAllValues().get(1))).isEqualTo(6);
     }
 
     @Test

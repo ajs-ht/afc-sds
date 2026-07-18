@@ -186,6 +186,15 @@ class PostValidationTest {
                 .containsExactly("invalid_un_number:UN12345");
     }
 
+    @Test
+    void longInvalidValuesAreClippedInWarnings() {
+        // Warning entries stay bounded even when the offending value is a
+        // long OCR garble: clipped to 49 chars plus an ellipsis.
+        String garbled = "x".repeat(60);
+        assertThat(PostValidation.collectDomainWarnings(docWithCas(garbled)))
+                .containsExactly("invalid_cas_number:" + "x".repeat(49) + "…");
+    }
+
     // --- aggregation --------------------------------------------------------
 
     @Test

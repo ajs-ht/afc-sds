@@ -238,6 +238,22 @@ class ExtractionServiceTest {
     }
 
     @Test
+    void emptyResponseTextIsRetriedThenThrows() {
+        // "" parses to nothing at all (not even invalid JSON); it must take
+        // the same retry-once path as any other schema-invalid response.
+        FakeGateway gateway =
+                new FakeGateway()
+                        .returning(
+                                TestFixtures.fakeMessage("", "end_turn"),
+                                TestFixtures.fakeMessage("", "end_turn"));
+
+        assertThatExceptionOfType(ClaudeResponseInvalidException.class)
+                .isThrownBy(() -> service(gateway).extractSds(PDF_BYTES, "application/pdf", "req-13d"));
+
+        assertThat(gateway.callCount()).isEqualTo(2);
+    }
+
+    @Test
     void unknownFieldInResponseFailsValidation() {
         ObjectNode payload = TestFixtures.minimalSdsPayload();
         payload.put("unexpected_field", "should not be allowed");
@@ -394,6 +410,64 @@ class ExtractionServiceTest {
         assertThat(result.warnings())
                 .containsExactly("retried_invalid_response", "structured_outputs_unavailable");
         assertThat(gateway.structuredCalls).containsExactly(true, true, false);
+    }
+
+    @Test
+    void grammarTooComplexErrorAlsoFallsBack() {
+        // The API words the grammar-size 400 as "too large" or "too complex";
+        // both must trigger the fallback.
+        FakeGateway gateway =
+                new FakeGateway()
+                        .returning(
+                                apiError(
+                                        ClaudeApiException.Kind.BAD_REQUEST,
+                                        "The compiled grammar is too complex"),
+                                TestFixtures.fakeMessage(minimalJson(), "end_turn"));
+
+        SdsExtractionResponse result =
+                structuredService(gateway).extractSds(PDF_BYTES, "application/pdf", "req-9b");
+
+        assertThat(result.warnings()).containsExactly("structured_outputs_unavailable");
+        assertThat(gateway.structuredCalls).containsExactly(true, false);
+    }
+
+    @Test
+    void badRequestWithoutMessageDoesNotFallBack() {
+        // A 400 carrying no message at all must be classified as an invalid
+        // document, not mistaken for (or crash on) the grammar-size check.
+        FakeGateway gateway =
+                new FakeGateway().returning(apiError(ClaudeApiException.Kind.BAD_REQUEST, null));
+
+        assertThatExceptionOfType(ClaudeInvalidDocumentException.class)
+                .isThrownBy(
+                        () -> structuredService(gateway).extractSds(PDF_BYTES, "application/pdf", "req-9c"));
+
+        assertThat(gateway.callCount()).isEqualTo(1);
+    }
+
+    @Test
+    void grammarWordingOnServerErrorDoesNotFallBack() {
+        // Only a BAD_REQUEST can be a grammar-size rejection; grammar-like
+        // wording on a 5xx must stay an upstream error and not trip the
+        // process-wide fallback flag.
+        FakeGateway gateway =
+                new FakeGateway()
+                        .returning(
+                                apiError(
+                                        ClaudeApiException.Kind.SERVER_ERROR,
+                                        "grammar too large (transient backend error)"));
+
+        assertThatExceptionOfType(ClaudeUpstreamException.class)
+                .isThrownBy(
+                        () -> structuredService(gateway).extractSds(PDF_BYTES, "application/pdf", "req-9d"))
+                .satisfies(exc -> assertThat(exc.statusCode()).isEqualTo(503));
+
+        assertThat(gateway.callCount()).isEqualTo(1);
+
+        FakeGateway next =
+                new FakeGateway().returning(TestFixtures.fakeMessage(minimalJson(), "end_turn"));
+        structuredService(next).extractSds(PDF_BYTES, "application/pdf", "req-9e");
+        assertThat(next.structuredCalls).containsExactly(true);
     }
 
     @Test

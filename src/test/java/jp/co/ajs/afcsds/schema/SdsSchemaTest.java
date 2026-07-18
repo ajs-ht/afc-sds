@@ -89,6 +89,46 @@ class SdsSchemaTest {
     }
 
     @Test
+    void maximalPayloadRoundTripsThroughStrictMappingAndValidation() throws Exception {
+        // The fully-populated counterpart of the minimal-payload test: the
+        // response is mapped with the STRICT_MAPPER (unknown properties are
+        // fatal), so a mismatched @JsonProperty in any nested type would make
+        // real responses carrying that structure fail as
+        // extraction_invalid_response — while every minimal-payload test
+        // stays green. This pins the mapping for the structures the minimal
+        // payload leaves empty.
+        JsonNode payload = TestFixtures.maximalSdsPayload();
+        assertThat(SdsSchema.VALIDATOR.validate(payload)).isEmpty();
+
+        SdsDocument doc = SdsSchema.STRICT_MAPPER.treeToValue(payload, SdsDocument.class);
+
+        assertThat(doc.section1ProductAndCompany.manufacturer.companyName)
+                .isEqualTo("テスト化学株式会社");
+        assertThat(doc.section1ProductAndCompany.supplier.emergencyPhone).isEqualTo("0120-111-111");
+        assertThat(doc.section2HazardsIdentification.ghsClassifications.get(0).hazardClass)
+                .isEqualTo("引火性液体");
+        assertThat(doc.section2HazardsIdentification.ghsClassifications.get(1).category).isNull();
+        assertThat(doc.section3Composition.ingredients.get(0).concentration).isEqualTo("60~70%");
+        assertThat(doc.section8ExposureControls.exposureLimits.get(0).limitType)
+                .isEqualTo("日本産業衛生学会 許容濃度");
+        assertThat(doc.section8ExposureControls.protectiveEquipment.skinAndBody)
+                .isEqualTo("長袖作業衣");
+        assertThat(doc.section9PhysicalChemicalProperties.partitionCoefficient)
+                .isEqualTo("log Pow -0.32");
+        assertThat(doc.section14Transport.unProperShippingName).isEqualTo("エタノール溶液");
+        assertThat(doc.section15Regulatory.regulations.get(0).lawName).isEqualTo("消防法");
+        assertThat(doc.additionalDocuments.get(0).endPage).isEqualTo(11);
+        assertThat(doc.extractionNotes).isNotNull();
+
+        // Serialization loses nothing: the round-tripped tree is identical
+        // to the input (the fixture spells out every field, nulls included)
+        // and passes schema validation again.
+        JsonNode serialized = TestFixtures.MAPPER.valueToTree(doc);
+        assertThat(SdsSchema.VALIDATOR.validate(serialized)).isEmpty();
+        assertThat(serialized).isEqualTo(payload);
+    }
+
+    @Test
     void serializedDocumentContainsEveryFieldInSnakeCase() throws Exception {
         SdsDocument doc =
                 SdsSchema.STRICT_MAPPER.treeToValue(TestFixtures.minimalSdsPayload(), SdsDocument.class);
