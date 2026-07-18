@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -18,6 +19,7 @@ import jp.co.ajs.afcsds.core.AppExceptions.ClaudeRefusalException;
 import jp.co.ajs.afcsds.core.AppExceptions.ClaudeResponseInvalidException;
 import jp.co.ajs.afcsds.core.AppExceptions.ClaudeTruncatedException;
 import jp.co.ajs.afcsds.core.AppExceptions.ClaudeUpstreamException;
+import jp.co.ajs.afcsds.core.AppExceptions.ServerBusyException;
 import jp.co.ajs.afcsds.core.AppLogs;
 import jp.co.ajs.afcsds.schema.Responses.ExtractionUsage;
 import jp.co.ajs.afcsds.schema.Responses.SdsExtractionResponse;
@@ -37,8 +39,8 @@ import org.springframework.stereotype.Service;
  * instead, and the response is strictly validated against the JSON schema
  * either way. A structured-outputs request that first hits the grammar-size
  * limit falls back to the prompt-embedded schema automatically and flips the
- * process-local {@code GRAMMAR_TOO_LARGE} flag so later requests skip
- * straight to the fallback. A response that fails schema validation (and
+ * {@code grammarTooLarge} flag (process-local — the service is a singleton)
+ * so later requests skip straight to the fallback. A response that fails schema validation (and
  * wasn't truncated by max_tokens) is retried once before giving up. See
  * {@link Prompts} for why structured outputs currently can't host the full
  * SDS schema.
@@ -60,22 +62,26 @@ public class ExtractionService {
     // Set to true the first time the API rejects our schema with a
     // compiled-grammar size error, so subsequent requests go straight to the
     // prompt-embedded-schema fallback instead of paying a doomed 400
-    // round-trip every time. Process-local; resets on restart (intentional —
-    // the limit may have been raised, or the schema shrunk, since the process
+    // round-trip every time. The service is a singleton, so this is
+    // process-local in practice; it resets on restart (intentional — the
+    // limit may have been raised, or the schema shrunk, since the process
     // last ran).
-    private static final AtomicBoolean GRAMMAR_TOO_LARGE = new AtomicBoolean(false);
-
-    /** Test hook: the grammar fallback flag is process-local state. */
-    static void resetGrammarTooLarge() {
-        GRAMMAR_TOO_LARGE.set(false);
-    }
+    private final AtomicBoolean grammarTooLarge = new AtomicBoolean(false);
 
     private final ClaudeGateway gateway;
     private final AppSettings settings;
 
+    // Backpressure: each extraction holds the full file in memory (plus its
+    // base64 form) across a minutes-long streaming Claude call, so unbounded
+    // concurrency risks memory exhaustion and rate-limit storms. Beyond this
+    // many in-flight extractions, requests are rejected immediately with
+    // server_busy (503 + Retry-After) instead of queueing.
+    private final Semaphore extractionSlots;
+
     public ExtractionService(ClaudeGateway gateway, AppSettings settings) {
         this.gateway = gateway;
         this.settings = settings;
+        this.extractionSlots = new Semaphore(settings.maxConcurrentExtractions());
     }
 
     /**
@@ -89,7 +95,20 @@ public class ExtractionService {
      * request.
      */
     public SdsExtractionResponse extractSds(byte[] content, String contentType, String requestId) {
-        boolean structured = settings.useStructuredOutputs() && !GRAMMAR_TOO_LARGE.get();
+        if (!extractionSlots.tryAcquire()) {
+            throw new ServerBusyException(
+                    "All %d extraction slots are busy; retry after a short delay."
+                            .formatted(settings.maxConcurrentExtractions()));
+        }
+        try {
+            return doExtract(content, contentType, requestId);
+        } finally {
+            extractionSlots.release();
+        }
+    }
+
+    private SdsExtractionResponse doExtract(byte[] content, String contentType, String requestId) {
+        boolean structured = settings.useStructuredOutputs() && !grammarTooLarge.get();
 
         RequestResult result = requestExtraction(content, contentType, structured, requestId);
         ClaudeMessage message = result.message();
@@ -152,7 +171,7 @@ public class ExtractionService {
             if (!(structured && isGrammarSizeError(exc))) {
                 throw mapApiException(exc);
             }
-            GRAMMAR_TOO_LARGE.set(true);
+            grammarTooLarge.set(true);
             structured = false;
             logger.warn(
                     "structured-outputs grammar exceeded the API size limit; falling back to "

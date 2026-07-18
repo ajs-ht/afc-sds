@@ -7,6 +7,10 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import jp.co.ajs.afcsds.TestFixtures;
 import jp.co.ajs.afcsds.config.AppSettings;
 import jp.co.ajs.afcsds.core.AppExceptions.ClaudeInvalidDocumentException;
@@ -14,9 +18,9 @@ import jp.co.ajs.afcsds.core.AppExceptions.ClaudeRefusalException;
 import jp.co.ajs.afcsds.core.AppExceptions.ClaudeResponseInvalidException;
 import jp.co.ajs.afcsds.core.AppExceptions.ClaudeTruncatedException;
 import jp.co.ajs.afcsds.core.AppExceptions.ClaudeUpstreamException;
+import jp.co.ajs.afcsds.core.AppExceptions.ServerBusyException;
 import jp.co.ajs.afcsds.schema.Responses.SdsExtractionResponse;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -75,13 +79,6 @@ class ExtractionServiceTest {
 
     private ExtractionService structuredService(FakeGateway gateway) {
         return new ExtractionService(gateway, TestFixtures.structuredOutputsSettings());
-    }
-
-    @BeforeEach
-    void resetGrammarFlag() {
-        // The grammar-too-large fallback flag is process-local state; make
-        // sure one test tripping it can't leak into another.
-        ExtractionService.resetGrammarTooLarge();
     }
 
     // --- happy path ---------------------------------------------------------
@@ -354,23 +351,23 @@ class ExtractionServiceTest {
 
     @Test
     void grammarSizeErrorIsRememberedAcrossRequests() {
-        FakeGateway first =
+        // The flag lives on the (singleton) service instance, so the second
+        // request through the same service goes straight to the fallback
+        // path: one call without structured outputs, but the response still
+        // notes that structured outputs were requested and unusable.
+        FakeGateway gateway =
                 new FakeGateway()
                         .returning(
                                 grammarTooLargeError(),
+                                TestFixtures.fakeMessage(minimalJson(), "end_turn"),
                                 TestFixtures.fakeMessage(minimalJson(), "end_turn"));
-        structuredService(first).extractSds(PDF_BYTES, "application/pdf", "req-10a");
+        ExtractionService service = structuredService(gateway);
 
-        // Second request goes straight to the fallback path: one call without
-        // structured outputs, but the response still notes that structured
-        // outputs were requested and unusable.
-        FakeGateway second =
-                new FakeGateway().returning(TestFixtures.fakeMessage(minimalJson(), "end_turn"));
-        SdsExtractionResponse result =
-                structuredService(second).extractSds(PDF_BYTES, "application/pdf", "req-10b");
+        service.extractSds(PDF_BYTES, "application/pdf", "req-10a");
+        SdsExtractionResponse result = service.extractSds(PDF_BYTES, "application/pdf", "req-10b");
 
         assertThat(result.warnings()).containsExactly("structured_outputs_unavailable");
-        assertThat(second.structuredCalls).containsExactly(false);
+        assertThat(gateway.structuredCalls).containsExactly(true, false, false);
     }
 
     @Test
@@ -449,45 +446,42 @@ class ExtractionServiceTest {
     void grammarWordingOnServerErrorDoesNotFallBack() {
         // Only a BAD_REQUEST can be a grammar-size rejection; grammar-like
         // wording on a 5xx must stay an upstream error and not trip the
-        // process-wide fallback flag.
+        // service-wide fallback flag.
         FakeGateway gateway =
                 new FakeGateway()
                         .returning(
                                 apiError(
                                         ClaudeApiException.Kind.SERVER_ERROR,
-                                        "grammar too large (transient backend error)"));
+                                        "grammar too large (transient backend error)"),
+                                TestFixtures.fakeMessage(minimalJson(), "end_turn"));
+        ExtractionService service = structuredService(gateway);
 
         assertThatExceptionOfType(ClaudeUpstreamException.class)
-                .isThrownBy(
-                        () -> structuredService(gateway).extractSds(PDF_BYTES, "application/pdf", "req-9d"))
+                .isThrownBy(() -> service.extractSds(PDF_BYTES, "application/pdf", "req-9d"))
                 .satisfies(exc -> assertThat(exc.statusCode()).isEqualTo(503));
 
-        assertThat(gateway.callCount()).isEqualTo(1);
-
-        FakeGateway next =
-                new FakeGateway().returning(TestFixtures.fakeMessage(minimalJson(), "end_turn"));
-        structuredService(next).extractSds(PDF_BYTES, "application/pdf", "req-9e");
-        assertThat(next.structuredCalls).containsExactly(true);
+        // The flag must not have been tripped: the next request through the
+        // same service still tries structured outputs.
+        service.extractSds(PDF_BYTES, "application/pdf", "req-9e");
+        assertThat(gateway.structuredCalls).containsExactly(true, true);
     }
 
     @Test
     void nonGrammarBadRequestDoesNotFallBack() {
         FakeGateway gateway =
                 new FakeGateway()
-                        .returning(apiError(ClaudeApiException.Kind.BAD_REQUEST, "bad request"));
+                        .returning(
+                                apiError(ClaudeApiException.Kind.BAD_REQUEST, "bad request"),
+                                TestFixtures.fakeMessage(minimalJson(), "end_turn"));
+        ExtractionService service = structuredService(gateway);
 
         assertThatExceptionOfType(ClaudeInvalidDocumentException.class)
-                .isThrownBy(
-                        () -> structuredService(gateway).extractSds(PDF_BYTES, "application/pdf", "req-11"));
-
-        assertThat(gateway.callCount()).isEqualTo(1);
+                .isThrownBy(() -> service.extractSds(PDF_BYTES, "application/pdf", "req-11"));
 
         // The flag must not have been tripped: the next request still tries
         // structured outputs.
-        FakeGateway next =
-                new FakeGateway().returning(TestFixtures.fakeMessage(minimalJson(), "end_turn"));
-        structuredService(next).extractSds(PDF_BYTES, "application/pdf", "req-11b");
-        assertThat(next.structuredCalls).containsExactly(true);
+        service.extractSds(PDF_BYTES, "application/pdf", "req-11b");
+        assertThat(gateway.structuredCalls).containsExactly(true, true);
     }
 
     // --- upstream error mapping -------------------------------------------------
@@ -537,5 +531,73 @@ class ExtractionServiceTest {
                 .satisfies(exc -> assertThat(exc.statusCode()).isEqualTo(400));
 
         assertThat(gateway.structuredCalls).containsExactly(true, false);
+    }
+
+    // --- concurrency limit -------------------------------------------------------
+
+    @Test
+    void extractionBeyondConcurrencyLimitIsRejectedAsServerBusy() throws Exception {
+        CountDownLatch firstCallEntered = new CountDownLatch(1);
+        CountDownLatch releaseFirstCall = new CountDownLatch(1);
+        ClaudeGateway blockingGateway =
+                (content, contentType, structured) -> {
+                    firstCallEntered.countDown();
+                    try {
+                        releaseFirstCall.await();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException(e);
+                    }
+                    return TestFixtures.fakeMessage(minimalJson(), "end_turn");
+                };
+        ExtractionService service =
+                new ExtractionService(blockingGateway, TestFixtures.settingsWithMaxConcurrent(1));
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<SdsExtractionResponse> inFlight =
+                    executor.submit(() -> service.extractSds(PDF_BYTES, "application/pdf", "req-17a"));
+            firstCallEntered.await();
+
+            // The only slot is held by the in-flight extraction: reject
+            // immediately (no queueing) with the retryable server_busy error.
+            assertThatExceptionOfType(ServerBusyException.class)
+                    .isThrownBy(() -> service.extractSds(PDF_BYTES, "application/pdf", "req-17b"))
+                    .satisfies(
+                            exc -> {
+                                assertThat(exc.statusCode()).isEqualTo(503);
+                                assertThat(exc.details()).containsEntry("retry_after_seconds", 30);
+                            });
+
+            releaseFirstCall.countDown();
+            assertThat(inFlight.get().data().schemaVersion).isEqualTo("2.1");
+        } finally {
+            releaseFirstCall.countDown();
+            executor.shutdownNow();
+        }
+
+        // The slot freed by the finished extraction is usable again — the
+        // limiter must release on completion, not leak permits.
+        SdsExtractionResponse again = service.extractSds(PDF_BYTES, "application/pdf", "req-17c");
+        assertThat(again.data().schemaVersion).isEqualTo("2.1");
+    }
+
+    @Test
+    void slotIsReleasedWhenExtractionFails() {
+        FakeGateway gateway =
+                new FakeGateway()
+                        .returning(
+                                apiError(ClaudeApiException.Kind.SERVER_ERROR, "kaboom"),
+                                TestFixtures.fakeMessage(minimalJson(), "end_turn"));
+        ExtractionService service =
+                new ExtractionService(gateway, TestFixtures.settingsWithMaxConcurrent(1));
+
+        assertThatExceptionOfType(ClaudeUpstreamException.class)
+                .isThrownBy(() -> service.extractSds(PDF_BYTES, "application/pdf", "req-18a"));
+
+        // A failed extraction must hand its slot back; otherwise the service
+        // would drain to permanent server_busy.
+        SdsExtractionResponse result = service.extractSds(PDF_BYTES, "application/pdf", "req-18b");
+        assertThat(result.data().schemaVersion).isEqualTo("2.1");
     }
 }

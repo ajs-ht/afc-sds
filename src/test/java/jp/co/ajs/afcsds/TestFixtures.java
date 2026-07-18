@@ -20,12 +20,30 @@ public final class TestFixtures {
     private TestFixtures() {}
 
     public static AppSettings settings() {
-        return new AppSettings("k", "claude-opus-4-8", "s", 32, 50, 24000, false, "INFO", "text");
+        return new AppSettings(
+                "k", "claude-opus-4-8", "s", 32, 50, 24000, 8, 2, false, "INFO", "text");
     }
 
     /** Settings with structured outputs opted in (off by default). */
     public static AppSettings structuredOutputsSettings() {
-        return new AppSettings("k", "claude-opus-4-8", "s", 32, 50, 24000, true, "INFO", "text");
+        return new AppSettings(
+                "k", "claude-opus-4-8", "s", 32, 50, 24000, 8, 2, true, "INFO", "text");
+    }
+
+    /** Settings with a specific extraction-concurrency limit. */
+    public static AppSettings settingsWithMaxConcurrent(int maxConcurrentExtractions) {
+        return new AppSettings(
+                "k",
+                "claude-opus-4-8",
+                "s",
+                32,
+                50,
+                24000,
+                maxConcurrentExtractions,
+                2,
+                false,
+                "INFO",
+                "text");
     }
 
     private static ObjectNode minimalSection(int number, String title) {

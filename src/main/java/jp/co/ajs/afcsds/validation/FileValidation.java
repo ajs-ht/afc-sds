@@ -77,7 +77,11 @@ public final class FileValidation {
      * <p>This is a best-effort check based on the Content-Length header
      * (present for ordinary multipart uploads). If the header is absent or
      * malformed we skip it silently — {@link #validateUpload} still catches an
-     * oversized body after it has been read.
+     * oversized body after it has been read. The header covers the whole
+     * multipart body (boundaries, part headers, the {@code pages} field), so
+     * it is compared against {@link AppSettings#maxRequestBytes()} — the file
+     * limit plus framing slack — not the bare file limit, which would falsely
+     * reject a file just under MAX_UPLOAD_MB.
      */
     public static void checkContentLength(String contentLengthHeader, AppSettings settings) {
         if (contentLengthHeader == null) {
@@ -91,9 +95,9 @@ public final class FileValidation {
             return;
         }
 
-        if (contentLength > settings.maxUploadBytes()) {
+        if (contentLength > settings.maxRequestBytes()) {
             throw new FileTooLargeException(
-                    "Request body of %d bytes exceeds the %dMB limit."
+                    "Request body of %d bytes exceeds the %dMB upload limit."
                             .formatted(contentLength, settings.maxUploadMb()),
                     Map.of("size_bytes", contentLength, "max_bytes", settings.maxUploadBytes()));
         }

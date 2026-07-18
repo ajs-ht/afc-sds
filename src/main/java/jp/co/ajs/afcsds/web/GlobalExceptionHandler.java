@@ -49,8 +49,15 @@ public class GlobalExceptionHandler {
                     requestId);
         }
 
-        return ResponseEntity.status(exc.statusCode())
-                .body(new ErrorResponse(new ErrorDetail(exc.errorType(), exc.getMessage(), requestId)));
+        ResponseEntity.BodyBuilder response = ResponseEntity.status(exc.statusCode());
+        // A retryable rejection (e.g. server_busy) tells callers when to come
+        // back via the standard Retry-After header.
+        Object retryAfter = exc.details().get("retry_after_seconds");
+        if (retryAfter != null) {
+            response.header("Retry-After", retryAfter.toString());
+        }
+        return response.body(
+                new ErrorResponse(new ErrorDetail(exc.errorType(), exc.getMessage(), requestId)));
     }
 
     /**

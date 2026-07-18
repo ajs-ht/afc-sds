@@ -13,13 +13,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import jp.co.ajs.afcsds.TestFixtures;
 import jp.co.ajs.afcsds.service.ClaudeApiException;
 import jp.co.ajs.afcsds.service.ClaudeGateway;
-import jp.co.ajs.afcsds.service.ExtractionServiceTestSupport;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -27,6 +26,11 @@ import org.springframework.test.web.servlet.MockMvc;
  * USE_STRUCTURED_OUTPUTS=true wired through the full HTTP stack: the property
  * must reach the gateway as {@code structured=true}, and the grammar-size
  * fallback must surface its warning in the JSON response.
+ *
+ * <p>The grammar fallback flag lives on the singleton ExtractionService, so
+ * the fallback test below would leak into the other test through the shared
+ * application context; DirtiesContext gives each test a fresh context (and
+ * therefore a fresh service instance) instead.
  */
 @SpringBootTest(
         properties = {
@@ -35,6 +39,7 @@ import org.springframework.test.web.servlet.MockMvc;
             "afc-sds.use-structured-outputs=true"
         })
 @AutoConfigureMockMvc
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
 class ExtractStructuredOutputsTest {
 
     private static final String API_KEY = "test-api-key";
@@ -42,13 +47,6 @@ class ExtractStructuredOutputsTest {
     @Autowired private MockMvc mockMvc;
 
     @MockitoBean private ClaudeGateway claudeGateway;
-
-    @BeforeEach
-    void resetGrammarFlag() {
-        // The grammar fallback flag is process-local; another test class (or
-        // the fallback test below) tripping it must not leak in or out.
-        ExtractionServiceTestSupport.resetGrammarTooLarge();
-    }
 
     private static MockMultipartFile pdfFile() {
         return new MockMultipartFile(

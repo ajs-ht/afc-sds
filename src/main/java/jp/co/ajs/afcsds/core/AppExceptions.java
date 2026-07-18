@@ -48,6 +48,19 @@ public final class AppExceptions {
         }
     }
 
+    /**
+     * All extraction slots are occupied (MAX_CONCURRENT_EXTRACTIONS); the
+     * caller should retry after a short delay. The {@code retry_after_seconds}
+     * detail is surfaced as a {@code Retry-After} response header.
+     */
+    public static class ServerBusyException extends AppException {
+        public static final int RETRY_AFTER_SECONDS = 30;
+
+        public ServerBusyException(String message) {
+            super(503, "server_busy", message, Map.of("retry_after_seconds", RETRY_AFTER_SECONDS));
+        }
+    }
+
     /** Claude declined to process the document for safety reasons. */
     public static class ClaudeRefusalException extends AppException {
         public ClaudeRefusalException(String message, Map<String, Object> details) {
