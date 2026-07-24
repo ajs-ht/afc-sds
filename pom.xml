@@ -7,7 +7,7 @@
   <parent>
     <groupId>org.springframework.boot</groupId>
     <artifactId>spring-boot-starter-parent</artifactId>
-    <version>3.5.16</version>
+    <version>4.1.0</version>
     <relativePath/>
   </parent>
 
@@ -19,9 +19,9 @@
 
   <properties>
     <java.version>21</java.version>
-    <anthropic-java.version>2.49.0</anthropic-java.version>
+    <anthropic-java.version>2.51.0</anthropic-java.version>
     <pdfbox.version>3.0.8</pdfbox.version>
-    <json-schema-validator.version>1.5.9</json-schema-validator.version>
+    <json-schema-validator.version>3.0.6</json-schema-validator.version>
   </properties>
 
   <dependencies>
@@ -78,7 +78,7 @@
       <plugin>
         <groupId>org.jacoco</groupId>
         <artifactId>jacoco-maven-plugin</artifactId>
-        <version>0.8.13</version>
+        <version>0.8.15</version>
         <configuration>
           <excludes>
             <exclude>jp/co/ajs/afcsds/AfcSdsApplication.class</exclude>
